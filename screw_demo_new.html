@@ -190,14 +190,19 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const COLOR_TOTALS = {
-            red: 30,
-            blue: 30,
-            green: 30,
-            yellow: 30,
-            purple: 30,
-        };
-        const TOTAL_SCREWS = Object.values(COLOR_TOTALS).reduce((a, b) => a + b, 0);
+        const TOTAL_SCREWS = 60;
+        let i = 0;
+        const COLOR_TOTALS = Array(TOTAL_SCREWS)
+            .fill(0)
+            .map((_, i) => i)
+            .reduce((acc, i) => {
+                if (i % 3 === 0) {
+                    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    acc[color] = acc[color] ? acc[color] + 3 : 3;
+                }
+                return acc;
+            }, {});
+        console.log(COLOR_TOTALS);
         const COLOR_BOX_TOTALS = Object.fromEntries(
             Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
         );
