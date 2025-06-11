@@ -468,15 +468,23 @@
         }
 
         function checkPlateRemoval(cell) {
-            const pid = cell.dataset.plateId;
-            if (!pid) return;
-            const plate = activePlates.find(p => p.id == pid);
-            if (!plate) return;
-            const hasDot = plate.screws.some(s => s.cell && s.dot);
-            if (!hasDot) {
-                removePlate(plate);
-                spawnNextPlate();
-            }
+            setTimeout(() => {
+                const pid = cell.dataset.plateId;
+                console.log('checkPlateRemoval:', pid);
+                if (!pid) return;
+                const plate = activePlates.find(p => p.id == pid);
+                console.log('plate:', plate);
+                if (!plate) return;
+                const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
+                console.log('hasDot:', hasDot);
+                if (!hasDot) {
+                    removePlate(plate);
+                    spawnNextPlate();
+                } else {
+                    console.log('hasDot:', plate.screws.find(s => s.cell && s.cell.querySelector('.dot') && s
+                        .dot));
+                }
+            }, 10);
         }
 
         function setupBox(box) {
