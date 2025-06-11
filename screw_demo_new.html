@@ -109,6 +109,28 @@
             left: 1px;
         }
 
+        #info-panel {
+            position: fixed;
+            right: 20px;
+            top: 100px;
+            width: 200px;
+            text-align: left;
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+            font-size: 14px;
+        }
+
+        #info-panel span {
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        #color-stats div {
+            margin-top: 2px;
+        }
+
         #message {
             margin-top: 20px;
             font-size: 1.2em;
@@ -139,20 +161,54 @@
         <div class="temp-slot"></div>
     </div>
 
+    <div id="info-panel">
+        <div>关卡总螺丝数:<span id="total-count"></span></div>
+        <div>已消除螺丝数:<span id="eliminated-count">0</span></div>
+        <div>未消除螺丝数:<span id="remaining-count">0</span></div>
+        <div>场上螺丝数:<span id="onboard-count">0</span></div>
+        <div>队列中螺丝数:<span id="queue-count">0</span></div>
+        <div id="color-stats"></div>
+    </div>
+
     <div id="game-board"></div>
 
     <div id="message"></div>
 
     <script>
         const COLORS = ["red", "blue", "green", "yellow", "purple"];
+        const COLOR_NAMES = {
+            red: "红色",
+            blue: "蓝色",
+            green: "绿色",
+            yellow: "黄色",
+            purple: "紫色"
+        };
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
+        const COLOR_TOTALS = {
+            red: 30,
+            blue: 30,
+            green: 30,
+            yellow: 30,
+            purple: 30
+        };
+        const TOTAL_SCREWS = Object.values(COLOR_TOTALS).reduce((a, b) => a + b, 0);
+
+        const colorPool = { ...COLOR_TOTALS };
+        const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
+        let eliminated = 0;
 
         const board = document.getElementById("game-board");
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
+        const totalCountEl = document.getElementById("total-count");
+        const eliminatedCountEl = document.getElementById("eliminated-count");
+        const remainingCountEl = document.getElementById("remaining-count");
+        const onboardCountEl = document.getElementById("onboard-count");
+        const queueCountEl = document.getElementById("queue-count");
+        const colorStats = document.getElementById("color-stats");
 
         const cellMap = [];
         let activeCells = [];
@@ -194,9 +250,41 @@
             }
         }
 
+        function spawnDot(color, cell) {
+            const dot = document.createElement("div");
+            dot.className = "dot";
+            dot.style.backgroundColor = color;
+            dot.dataset.color = color;
+            dot.addEventListener("click", () => handleDotClick(dot));
+            cell.appendChild(dot);
+            colorPool[color]--;
+            colorOnField[color]++;
+        }
+
+        function removeDot(dot) {
+            const color = dot.dataset.color;
+            dot.remove();
+            colorOnField[color]--;
+            eliminated++;
+        }
+
         function setupBox(box) {
-            const availableColors = COLORS.filter(c => !usedBoxColors.has(c));
-            if (availableColors.length === 0) return;
+            // clear previous filled dots and count them as eliminated
+            [...box.children].forEach(child => {
+                if (child.dataset.filled) {
+                    colorOnField[child.dataset.color]--;
+                    eliminated++;
+                }
+            });
+
+            const availableColors = COLORS.filter(c => !usedBoxColors.has(c) && colorPool[c] > 0);
+            if (availableColors.length === 0) {
+                box.dataset.enabled = "false";
+                box.classList.remove("enabled");
+                box.style.borderColor = "#ccc";
+                box.innerHTML = "";
+                return;
+            }
 
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
@@ -205,16 +293,11 @@
                 return;
             }
 
-            for (let i = 0; i < 3; i++) {
+            const createCount = Math.min(3, colorPool[color], availableCells.length);
+            for (let i = 0; i < createCount; i++) {
                 const index = Math.floor(Math.random() * availableCells.length);
                 const cell = availableCells.splice(index, 1)[0];
-
-                const dot = document.createElement("div");
-                dot.className = "dot";
-                dot.style.backgroundColor = color;
-                dot.dataset.color = color;
-                dot.addEventListener("click", () => handleDotClick(dot));
-                cell.appendChild(dot);
+                spawnDot(color, cell);
             }
 
             box.dataset.color = color;
@@ -231,6 +314,7 @@
             }
 
             absorbTempDots(color, box);
+            updateInfo();
         }
 
         function absorbTempDots(color, box) {
@@ -246,7 +330,7 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
-                    matchingDots[i].remove();
+                    removeDot(matchingDots[i]);
                 }
                 setTimeout(() => {
                     usedBoxColors.delete(color);
@@ -254,6 +338,8 @@
                     showMessage("🎉 自动三消！");
                     ensureDotCount();
                     setTimeout(() => showMessage(""), 1500);
+                    updateInfo();
+                    checkVictory();
                 }, 300);
             } else {
                 for (let dot of matchingDots) {
@@ -268,6 +354,8 @@
                         dot.remove();
                     }
                 }
+                updateInfo();
+                checkVictory();
             }
         }
 
@@ -275,30 +363,31 @@
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
             const maxToPlace = Math.min(count, availableCells.length);
             for (let i = 0; i < maxToPlace; i++) {
+                const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
+                if (colorsCanUse.length === 0) return;
+                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
                 const index = Math.floor(Math.random() * availableCells.length);
                 const cell = availableCells.splice(index, 1)[0];
-
-                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                const dot = document.createElement("div");
-                dot.className = "dot";
-                dot.style.backgroundColor = color;
-                dot.dataset.color = color;
-                dot.addEventListener("click", () => handleDotClick(dot));
-                cell.appendChild(dot);
+                spawnDot(color, cell);
             }
+        }
+
+        function totalRemainingPool() {
+            return COLORS.reduce((s, c) => s + colorPool[c], 0);
         }
 
         function ensureDotCount() {
             setTimeout(() => {
                 const current = document.querySelectorAll("#game-board .dot").length;
-                const targetMin = 9;
-                const targetMax = 15;
-
-                if (current < targetMin) {
-                    const toAdd = Math.min(targetMin - current, activeCells.filter(c => c.children.length === 0).length);
+                const target = 15;
+                const remaining = totalRemainingPool();
+                if (current < target && remaining > 0) {
+                    const free = activeCells.filter(c => c.children.length === 0).length;
+                    const toAdd = Math.min(target - current, remaining, free);
                     placeDots(toAdd);
                 }
-                // 如果 >=15 就不生成；在 9~14 之间保持不动
+                updateInfo();
+                checkVictory();
             }, 100);
         }
 
@@ -318,6 +407,8 @@
                     emptySlot.replaceWith(newDot);
                     dot.remove();
                     ensureDotCount();
+                    updateInfo();
+                    checkVictory();
 
                     const filled = [...box.children].filter(s => s.dataset.color === color).length;
                     if (filled === 3) {
@@ -327,6 +418,8 @@
                             showMessage("🎉 三消成功！");
                             ensureDotCount();
                             setTimeout(() => showMessage(""), 1500);
+                            updateInfo();
+                            checkVictory();
                         }, 300);
                     }
                     return;
@@ -337,11 +430,14 @@
                 if (temp.children.length === 0) {
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
+                    updateInfo();
+                    checkVictory();
                     return;
                 }
             }
 
             showMessage("💥 游戏失败！临时槽已满！");
+            disableGame();
         }
 
         function initBoxes() {
@@ -366,6 +462,38 @@
 
         function showMessage(msg) {
             message.textContent = msg;
+        }
+
+        function updateInfo() {
+            totalCountEl.textContent = TOTAL_SCREWS;
+            eliminatedCountEl.textContent = eliminated;
+            const queue = totalRemainingPool();
+            const onBoard = document.querySelectorAll("#game-board .dot").length;
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            const remaining = queue + boxDots + tempDots + onBoard;
+            remainingCountEl.textContent = remaining;
+            onboardCountEl.textContent = onBoard;
+            queueCountEl.textContent = queue;
+            colorStats.innerHTML = COLORS.map(c => {
+                const count = colorPool[c] + colorOnField[c];
+                return `<div style="color:${c}">${COLOR_NAMES[c]}:<span>${count}</span></div>`;
+            }).join("");
+        }
+
+        function disableGame() {
+            document.querySelectorAll('.dot').forEach(d => d.style.pointerEvents = 'none');
+            boxes.forEach(b => b.style.pointerEvents = 'none');
+        }
+
+        function checkVictory() {
+            const boardDots = document.querySelectorAll('#game-board .dot').length;
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
+                showMessage('🏆 游戏胜利！');
+                disableGame();
+            }
         }
 
         createGrid();
