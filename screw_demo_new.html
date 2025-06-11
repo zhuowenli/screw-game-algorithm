@@ -283,12 +283,13 @@
             }
         }
 
-        // 随机生成所有板块及其螺丝位置
+        // 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
         function generatePlates() {
             let remaining = TOTAL_SCREWS;
             let id = 0;
             while (remaining > 0) {
-                const screwCount = Math.min(9, Math.max(1, Math.floor(Math.random() * 9) + 1, remaining));
+                // 在剩余螺丝数和 1-9 之间取较小值，确保数量随机
+                const screwCount = Math.min(remaining, Math.floor(Math.random() * 9) + 1);
                 const width = Math.floor(Math.random() * 6) + 3;
                 const height = Math.floor(Math.random() * 6) + 3;
                 const row = Math.floor(Math.random() * (ROWS - height));
