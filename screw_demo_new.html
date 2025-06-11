@@ -349,6 +349,14 @@
 
         // 在场景中生成一个板块及其螺丝
         function spawnPlate(plate) {
+            // 过滤掉已存在螺丝的格子，避免同一位置出现多个螺丝
+            plate.cells = plate.cells.filter(c => !c.querySelector('.dot'));
+            // 若没有可用坑位，直接跳过该板块
+            if (plate.cells.length === 0) {
+                spawnNextPlate();
+                return;
+            }
+
             const overlay = document.createElement('div');
             overlay.className = 'plate';
             overlay.style.backgroundColor = plate.color;
