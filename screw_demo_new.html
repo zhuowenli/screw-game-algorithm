@@ -109,6 +109,16 @@
             left: 1px;
         }
 
+        #info-panel {
+            margin: 10px auto;
+            font-size: 14px;
+        }
+
+        #info-panel span {
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
         #message {
             margin-top: 20px;
             font-size: 1.2em;
@@ -139,6 +149,11 @@
         <div class="temp-slot"></div>
     </div>
 
+    <div id="info-panel">
+        颜色种类:<span id="color-count">0</span>
+        | 场上螺丝数量:<span id="dot-count">0</span>
+    </div>
+
     <div id="game-board"></div>
 
     <div id="message"></div>
@@ -148,11 +163,16 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
+        const TOTAL_SCREWS = 150;
+
+        let remainingPool = TOTAL_SCREWS;
 
         const board = document.getElementById("game-board");
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
+        const colorCountEl = document.getElementById("color-count");
+        const dotCountEl = document.getElementById("dot-count");
 
         const cellMap = [];
         let activeCells = [];
@@ -205,7 +225,8 @@
                 return;
             }
 
-            for (let i = 0; i < 3; i++) {
+            const createCount = Math.min(3, remainingPool, availableCells.length);
+            for (let i = 0; i < createCount; i++) {
                 const index = Math.floor(Math.random() * availableCells.length);
                 const cell = availableCells.splice(index, 1)[0];
 
@@ -216,6 +237,7 @@
                 dot.addEventListener("click", () => handleDotClick(dot));
                 cell.appendChild(dot);
             }
+            remainingPool -= createCount;
 
             box.dataset.color = color;
             box.dataset.enabled = "true";
@@ -231,6 +253,7 @@
             }
 
             absorbTempDots(color, box);
+            updateInfo();
         }
 
         function absorbTempDots(color, box) {
@@ -254,6 +277,8 @@
                     showMessage("🎉 自动三消！");
                     ensureDotCount();
                     setTimeout(() => showMessage(""), 1500);
+                    updateInfo();
+                    checkVictory();
                 }, 300);
             } else {
                 for (let dot of matchingDots) {
@@ -268,6 +293,8 @@
                         dot.remove();
                     }
                 }
+                updateInfo();
+                checkVictory();
             }
         }
 
@@ -291,14 +318,15 @@
         function ensureDotCount() {
             setTimeout(() => {
                 const current = document.querySelectorAll("#game-board .dot").length;
-                const targetMin = 9;
-                const targetMax = 15;
-
-                if (current < targetMin) {
-                    const toAdd = Math.min(targetMin - current, activeCells.filter(c => c.children.length === 0).length);
+                const target = 15;
+                if (current < target && remainingPool > 0) {
+                    const free = activeCells.filter(c => c.children.length === 0).length;
+                    const toAdd = Math.min(target - current, remainingPool, free);
                     placeDots(toAdd);
+                    remainingPool -= toAdd;
                 }
-                // 如果 >=15 就不生成；在 9~14 之间保持不动
+                updateInfo();
+                checkVictory();
             }, 100);
         }
 
@@ -318,6 +346,8 @@
                     emptySlot.replaceWith(newDot);
                     dot.remove();
                     ensureDotCount();
+                    updateInfo();
+                    checkVictory();
 
                     const filled = [...box.children].filter(s => s.dataset.color === color).length;
                     if (filled === 3) {
@@ -327,6 +357,8 @@
                             showMessage("🎉 三消成功！");
                             ensureDotCount();
                             setTimeout(() => showMessage(""), 1500);
+                            updateInfo();
+                            checkVictory();
                         }, 300);
                     }
                     return;
@@ -337,11 +369,14 @@
                 if (temp.children.length === 0) {
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
+                    updateInfo();
+                    checkVictory();
                     return;
                 }
             }
 
             showMessage("💥 游戏失败！临时槽已满！");
+            disableGame();
         }
 
         function initBoxes() {
@@ -366,6 +401,29 @@
 
         function showMessage(msg) {
             message.textContent = msg;
+        }
+
+        function updateInfo() {
+            const dots = document.querySelectorAll("#game-board .dot");
+            const colors = new Set();
+            dots.forEach(d => colors.add(d.dataset.color));
+            colorCountEl.textContent = colors.size;
+            dotCountEl.textContent = dots.length;
+        }
+
+        function disableGame() {
+            document.querySelectorAll('.dot').forEach(d => d.style.pointerEvents = 'none');
+            boxes.forEach(b => b.style.pointerEvents = 'none');
+        }
+
+        function checkVictory() {
+            const boardDots = document.querySelectorAll('#game-board .dot').length;
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            if (boardDots === 0 && boxDots === 0 && tempDots === 0 && remainingPool === 0) {
+                showMessage('🏆 游戏胜利！');
+                disableGame();
+            }
         }
 
         createGrid();
