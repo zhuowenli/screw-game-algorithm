@@ -72,7 +72,7 @@
             width: 28px;
             height: 28px;
             border-radius: 50%;
-            background: rgba(0,0,0,0.3);
+            background: rgba(0, 0, 0, 0.3);
             pointer-events: none;
             display: flex;
             justify-content: center;
@@ -380,7 +380,7 @@
                     col,
                     width,
                     height,
-                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.4)`,
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
                     screws,
                     zIndex: nextPlateZ
                 });
@@ -506,7 +506,10 @@
         function getDotCenter(dot) {
             const br = board.getBoundingClientRect();
             const dr = dot.getBoundingClientRect();
-            return { x: dr.left - br.left + dr.width / 2, y: dr.top - br.top + dr.height / 2 };
+            return {
+                x: dr.left - br.left + dr.width / 2,
+                y: dr.top - br.top + dr.height / 2
+            };
         }
 
         function drawLine(fromDot, toDot) {
@@ -524,7 +527,10 @@
 
         function removeConnection(conn) {
             conn.line && conn.line.remove();
-            if (conn.locked.overlay) { conn.locked.overlay.remove(); conn.locked.overlay = null; }
+            if (conn.locked.overlay) {
+                conn.locked.overlay.remove();
+                conn.locked.overlay = null;
+            }
             if (conn.locked.dot) {
                 conn.locked.dot.dataset.blocked = 'false';
                 conn.locked.dot.classList.remove('blocked');
@@ -550,7 +556,11 @@
             }
             if (controller.dot && locked.dot) {
                 const line = drawLine(controller.dot, locked.dot);
-                lockConnections.push({ controller, locked, line });
+                lockConnections.push({
+                    controller,
+                    locked,
+                    line
+                });
             }
         }
 
