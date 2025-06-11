@@ -24,13 +24,14 @@
             margin: 20px auto;
             background: #ccc;
             width: fit-content;
+            position: relative;
         }
 
-        .cell {
-            width: 30px;
-            height: 30px;
-            background: #eee;
-            position: relative;
+        .plate {
+            position: absolute;
+            pointer-events: none;
+            border-radius: 4px;
+            z-index: 1;
         }
 
         .dot {
@@ -42,7 +43,17 @@
             left: 1px;
             cursor: pointer;
             box-shadow: 0 0 2px #555;
+            z-index: 10;
         }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            background: #eee;
+            position: relative;
+        }
+
+
 
         #boxes {
             display: flex;
@@ -190,10 +201,7 @@
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
         const TOTAL_SCREWS = 90;
-        // 场上螺丝数量下限
-        const MIN_ONFIELD = 15;
-        // 场上螺丝数量上限
-        const MAX_ONFIELD = 21;
+        const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
 
@@ -236,6 +244,8 @@
         const cellMap = [];
         let activeCells = [];
         let usedBoxColors = new Set();
+        let plateQueue = [];
+        let activePlates = [];
 
         function createGrid() {
             for (let row = 0; row < ROWS; row++) {
@@ -273,6 +283,41 @@
             }
         }
 
+        // 随机生成所有板块及其螺丝位置
+        function generatePlates() {
+            let remaining = TOTAL_SCREWS;
+            let id = 0;
+            while (remaining > 0) {
+                const screwCount = Math.min(9, Math.max(1, Math.floor(Math.random() * 9) + 1, remaining));
+                const width = Math.floor(Math.random() * 6) + 3;
+                const height = Math.floor(Math.random() * 6) + 3;
+                const row = Math.floor(Math.random() * (ROWS - height));
+                const col = Math.floor(Math.random() * (COLS - width));
+                const cells = [];
+                for (let r = row; r < row + height; r++) {
+                    for (let c = col; c < col + width; c++) {
+                        cells.push(cellMap[r][c]);
+                    }
+                }
+                // 打乱并选取放置螺丝的格子
+                for (let i = cells.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [cells[i], cells[j]] = [cells[j], cells[i]];
+                }
+                const plateCells = cells.slice(0, screwCount);
+                plateQueue.push({
+                    id: id++,
+                    row,
+                    col,
+                    width,
+                    height,
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.25)`,
+                    cells: plateCells
+                });
+                remaining -= screwCount;
+            }
+        }
+
         function spawnDot(color, cell) {
             const dot = document.createElement("div");
             dot.className = "dot";
@@ -286,9 +331,57 @@
 
         function removeDot(dot) {
             const color = dot.dataset.color;
+            const cell = dot.parentElement;
             dot.remove();
             colorOnField[color]--;
             eliminated++;
+            if (cell) checkPlateRemoval(cell);
+        }
+
+        // 在场景中生成一个板块及其螺丝
+        function spawnPlate(plate) {
+            const overlay = document.createElement('div');
+            overlay.className = 'plate';
+            overlay.style.backgroundColor = plate.color;
+            overlay.style.left = plate.col * 32 + 'px';
+            overlay.style.top = plate.row * 32 + 'px';
+            overlay.style.width = plate.width * 32 - 2 + 'px';
+            overlay.style.height = plate.height * 32 - 2 + 'px';
+            overlay.style.zIndex = activePlates.length + 1;
+            board.appendChild(overlay);
+            plate.overlay = overlay;
+            activePlates.push(plate);
+            for (const cell of plate.cells) {
+                const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
+                if (colorsCanUse.length === 0) break;
+                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
+                cell.dataset.plateId = plate.id;
+                spawnDot(color, cell);
+            }
+        }
+
+        function removePlate(plate) {
+            plate.overlay && plate.overlay.remove();
+            activePlates = activePlates.filter(p => p !== plate);
+        }
+
+        function spawnNextPlate() {
+            if (plateQueue.length === 0) return;
+            if (activePlates.length >= MAX_VISIBLE_PLATES) return;
+            const next = plateQueue.shift();
+            spawnPlate(next);
+        }
+
+        function checkPlateRemoval(cell) {
+            const pid = cell.dataset.plateId;
+            if (!pid) return;
+            const plate = activePlates.find(p => p.id == pid);
+            if (!plate) return;
+            const hasDot = plate.cells.some(c => c.querySelector('.dot'));
+            if (!hasDot) {
+                removePlate(plate);
+                spawnNextPlate();
+            }
         }
 
         function setupBox(box) {
@@ -324,14 +417,6 @@
 
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
             boxPool[color]--;
-            const availableCells = activeCells.filter(cell => cell.children.length === 0);
-            const current = document.querySelectorAll("#game-board .dot").length;
-            const maxSpawn = Math.max(0, MAX_ONFIELD - current);
-            const createCount = Math.min(3, colorPool[color], availableCells.length, maxSpawn);
-            const cells = chooseSpawnCells(createCount, availableCells);
-            for (const cell of cells) {
-                spawnDot(color, cell);
-            }
 
             box.dataset.color = color;
             box.dataset.enabled = "true";
@@ -369,7 +454,6 @@
                     usedBoxColors.delete(color);
                     setupBox(box);
                     showMessage("🎉 自动三消！");
-                    ensureDotCount();
                     setTimeout(() => showMessage(""), 1500);
                     updateInfo();
                     checkVictory();
@@ -392,70 +476,12 @@
             }
         }
 
-        // 计算两个格子之间的距离平方，用于比较远近
-        function distance(a, b) {
-            const dr = a.dataset.row - b.dataset.row;
-            const dc = a.dataset.col - b.dataset.col;
-            return dr * dr + dc * dc;
-        }
 
-        // 按距离和格子编号选择生成位置，优先靠近上次拔出的格子
-        function chooseSpawnCells(count, cells) {
-            const result = [];
-            if (cells.length === 0) return result;
-            // 首局没有拔出位置时随机取点
-            if (!lastRemovedCell) {
-                for (let i = 0; i < count && cells.length > 0; i++) {
-                    const idx = Math.floor(Math.random() * cells.length);
-                    result.push(cells.splice(idx, 1)[0]);
-                }
-                return result;
-            }
-            // 根据距离排序，距离近的在前，距离相同则比较格子 ID
-            cells.sort((a, b) => {
-                const da = distance(a, lastRemovedCell);
-                const db = distance(b, lastRemovedCell);
-                if (da !== db) return da - db;
-                const idA = parseInt(a.dataset.row) * COLS + parseInt(a.dataset.col);
-                const idB = parseInt(b.dataset.row) * COLS + parseInt(b.dataset.col);
-                return idA - idB;
-            });
-            for (let i = 0; i < count && cells.length > 0; i++) {
-                result.push(cells[i]);
-            }
-            return result;
-        }
-
-        function placeDots(count) {
-            const availableCells = activeCells.filter(cell => cell.children.length === 0);
-            const maxToPlace = Math.min(count, availableCells.length);
-            const cells = chooseSpawnCells(maxToPlace, availableCells);
-            for (const cell of cells) {
-                const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
-                if (colorsCanUse.length === 0) return;
-                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
-                spawnDot(color, cell);
-            }
-        }
 
         function totalRemainingPool() {
             return COLORS.reduce((s, c) => s + colorPool[c], 0);
         }
 
-        // 自动补充螺丝，确保场上数量在设定范围内
-        function ensureDotCount() {
-            setTimeout(() => {
-                const current = document.querySelectorAll("#game-board .dot").length;
-                const remaining = totalRemainingPool();
-                if (current < MIN_ONFIELD && remaining > 0) {
-                    const free = activeCells.filter(c => c.children.length === 0).length;
-                    const toAdd = Math.min(MIN_ONFIELD - current, remaining, free, MAX_ONFIELD - current);
-                    placeDots(toAdd);
-                }
-                updateInfo();
-                checkVictory();
-            }, 100);
-        }
 
         function handleDotClick(dot) {
             const color = dot.dataset.color;
@@ -473,9 +499,9 @@
                     newDot.dataset.filled = "true";
                     emptySlot.replaceWith(newDot);
                     dot.remove();
+                    checkPlateRemoval(fromCell);
                     // 记录本次拔出的格子，供生成算法使用
                     lastRemovedCell = fromCell;
-                    ensureDotCount();
                     updateInfo();
                     checkVictory();
 
@@ -485,7 +511,6 @@
                             usedBoxColors.delete(box.dataset.color);
                             setupBox(box);
                             showMessage("🎉 三消成功！");
-                            ensureDotCount();
                             setTimeout(() => showMessage(""), 1500);
                             updateInfo();
                             checkVictory();
@@ -502,6 +527,7 @@
                     dot.style.position = "absolute";
                     // 记录本次拔出的格子，供生成算法使用
                     lastRemovedCell = fromCell;
+                    checkPlateRemoval(fromCell);
                     updateInfo();
                     checkVictory();
                     return;
@@ -575,8 +601,11 @@
 
         createGrid();
         activateCells();
+        generatePlates();
+        for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
+            spawnNextPlate();
+        }
         initBoxes();
-        ensureDotCount(); // ✅ 自动控制数量在 15~21
     </script>
 </body>
 
