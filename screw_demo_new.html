@@ -407,7 +407,7 @@
             const screw = screwMap[dot.dataset.sid];
             if (screw) screw.dot = null;
             lockConnections.slice().forEach(conn => {
-            cleanupOrphanLocks();
+                cleanupOrphanLocks();
                 if (conn.controller.id === screw.id || conn.locked.id === screw.id) removeConnection(conn);
             });
             dot.remove();
@@ -473,7 +473,6 @@
                 if (screw.cell) screw.cell.dataset.plateId = '';
             }
             activePlates = activePlates.filter(p => p !== plate);
-            cleanupOrphanLocks();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
@@ -510,12 +509,15 @@
             lockConnections = lockConnections.filter(conn => {
                 const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
                 if (valid) {
-                    connectedControllers.add(conn.controller);
-                    connectedLocked.add(conn.locked);
+                    connectedControllers.add(conn.controller.id);
+                    connectedLocked.add(conn.locked.id);
                     return true;
                 }
                 conn.line && conn.line.remove();
-                if (conn.locked.overlay) { conn.locked.overlay.remove(); conn.locked.overlay = null; }
+                if (conn.locked.overlay) {
+                    conn.locked.overlay.remove();
+                    conn.locked.overlay = null;
+                }
                 if (conn.locked.dot) {
                     conn.locked.dot.dataset.blocked = 'false';
                     conn.locked.dot.classList.remove('blocked');
@@ -526,18 +528,25 @@
                 return false;
             });
 
+            console.log(connectedLocked);
+            console.log(connectedControllers);
+
             for (const id in screwMap) {
                 const s = screwMap[id];
-                if (s.locked && !connectedLocked.has(s)) {
+                if (s.locked && !connectedLocked.has(s.id) && !connectedControllers.has(s.id)) {
+                    console.log(s.id, s);
                     s.locked = false;
                     s.controller = null;
-                    if (s.overlay) { s.overlay.remove(); s.overlay = null; }
+                    if (s.overlay) {
+                        s.overlay.remove();
+                        s.overlay = null;
+                    }
                     if (s.dot) {
                         s.dot.dataset.blocked = 'false';
                         s.dot.classList.remove('blocked');
                     }
                 }
-                if (s.controls && !connectedControllers.has(s)) {
+                if (s.controls && !connectedControllers.has(s.id)) {
                     s.controls = null;
                 }
             }
@@ -547,7 +556,6 @@
         function getDotCenter(dot) {
             const br = board.getBoundingClientRect();
             const dr = dot.getBoundingClientRect();
-            cleanupOrphanLocks();
             return {
                 x: dr.left - br.left + dr.width / 2,
                 y: dr.top - br.top + dr.height / 2
@@ -604,6 +612,7 @@
                     line
                 });
             }
+            cleanupOrphanLocks();
         }
 
         function canControl(controller, target) {
@@ -748,8 +757,7 @@
                     if (emptySlot) {
                         const newDot = document.createElement("div");
                         newDot.className = "slot";
-                    cleanupOrphanLocks();
-                    cleanupOrphanLocks();
+                        cleanupOrphanLocks();
                         newDot.style.backgroundColor = color;
                         newDot.dataset.color = color;
                         newDot.dataset.filled = "true";
