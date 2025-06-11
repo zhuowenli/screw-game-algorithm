@@ -358,7 +358,8 @@
                         locked: false,
                         controller: null,
                         controls: null,
-                        overlay: null
+                        overlay: null,
+                        plateId: id
                     });
                     tempPool[color]--;
                     remaining--;
@@ -549,6 +550,7 @@
         }
 
         function canControl(controller, target) {
+            if (controller.plateId !== target.plateId) return false;
             if (controller.controls || target.controller) return false;
             let c = controller;
             let depth = 1;
@@ -562,14 +564,16 @@
         }
 
         function setupLocks() {
-            const all = activePlates.flatMap(p => p.screws);
-            const candidates = all.filter(s => !s.controller && !s.controls);
-            for (const locked of candidates) {
-                if (Math.random() > 0.2) continue;
-                const controllers = all.filter(c => c !== locked && canControl(c, locked));
-                if (controllers.length === 0) continue;
-                const controller = controllers[Math.floor(Math.random() * controllers.length)];
-                applyLock(controller, locked);
+            for (const plate of activePlates) {
+                const all = plate.screws;
+                const candidates = all.filter(s => !s.controller && !s.controls);
+                for (const locked of candidates) {
+                    if (Math.random() > 0.2) continue;
+                    const controllers = all.filter(c => c !== locked && canControl(c, locked));
+                    if (controllers.length === 0) continue;
+                    const controller = controllers[Math.floor(Math.random() * controllers.length)];
+                    applyLock(controller, locked);
+                }
             }
             updateDotBlockStates();
         }
@@ -578,6 +582,7 @@
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
                 const next = plates[nextPlateIndex++];
                 if (spawnPlate(next)) {
+                    setupLocks();
                     break;
                 }
             }
