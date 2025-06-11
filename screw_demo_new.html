@@ -190,8 +190,11 @@
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
         const TOTAL_SCREWS = 90;
+        // 场上螺丝数量下限
         const MIN_ONFIELD = 15;
+        // 场上螺丝数量上限
         const MAX_ONFIELD = 21;
+        // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
 
         // 螺丝生成算法：每3个螺丝随机生成一个颜色，直到生成TOTAL_SCREWS个螺丝
@@ -389,15 +392,18 @@
             }
         }
 
+        // 计算两个格子之间的距离平方，用于比较远近
         function distance(a, b) {
             const dr = a.dataset.row - b.dataset.row;
             const dc = a.dataset.col - b.dataset.col;
             return dr * dr + dc * dc;
         }
 
+        // 按距离和格子编号选择生成位置，优先靠近上次拔出的格子
         function chooseSpawnCells(count, cells) {
             const result = [];
             if (cells.length === 0) return result;
+            // 首局没有拔出位置时随机取点
             if (!lastRemovedCell) {
                 for (let i = 0; i < count && cells.length > 0; i++) {
                     const idx = Math.floor(Math.random() * cells.length);
@@ -405,6 +411,7 @@
                 }
                 return result;
             }
+            // 根据距离排序，距离近的在前，距离相同则比较格子 ID
             cells.sort((a, b) => {
                 const da = distance(a, lastRemovedCell);
                 const db = distance(b, lastRemovedCell);
@@ -435,6 +442,7 @@
             return COLORS.reduce((s, c) => s + colorPool[c], 0);
         }
 
+        // 自动补充螺丝，确保场上数量在设定范围内
         function ensureDotCount() {
             setTimeout(() => {
                 const current = document.querySelectorAll("#game-board .dot").length;
@@ -465,6 +473,7 @@
                     newDot.dataset.filled = "true";
                     emptySlot.replaceWith(newDot);
                     dot.remove();
+                    // 记录本次拔出的格子，供生成算法使用
                     lastRemovedCell = fromCell;
                     ensureDotCount();
                     updateInfo();
@@ -491,6 +500,7 @@
                     const fromCell = dot.parentElement;
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
+                    // 记录本次拔出的格子，供生成算法使用
                     lastRemovedCell = fromCell;
                     updateInfo();
                     checkVictory();
