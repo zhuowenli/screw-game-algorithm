@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <title>三消游戏（自动补点 + 配套圆点）</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f8f8f8;
+            text-align: center;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(20, 30px);
+            grid-template-rows: repeat(30, 30px);
+            gap: 2px;
+            margin: 20px auto;
+            background: #ccc;
+            width: fit-content;
+        }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            background: #eee;
+            position: relative;
+        }
+
+        .dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            position: absolute;
+            top: 1px;
+            left: 1px;
+            cursor: pointer;
+            box-shadow: 0 0 2px #555;
+        }
+
+        #boxes {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px auto;
+        }
+
+        .box {
+            width: 120px;
+            height: 60px;
+            border-radius: 15px;
+            background-color: white;
+            border: 3px dashed #ccc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 5px;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .box.enabled {
+            cursor: default;
+            justify-content: space-around;
+        }
+
+        .box .slot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: inset 0 0 2px #999;
+        }
+
+        .box .hint {
+            position: absolute;
+            color: #999;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        #temp-slots {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px auto;
+        }
+
+        .temp-slot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 2px dashed #aaa;
+            background: #fff;
+            box-shadow: inset 0 0 2px #999;
+            position: relative;
+        }
+
+        .temp-slot .dot {
+            position: absolute;
+            top: 1px;
+            left: 1px;
+        }
+
+        #message {
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>三消游戏（自动补点 + 配套圆点）</h1>
+
+    <div id="boxes">
+        <div class="box" data-enabled="true"></div>
+        <div class="box" data-enabled="true"></div>
+        <div class="box" data-enabled="false">
+            <div class="hint">点击开启</div>
+        </div>
+        <div class="box" data-enabled="false">
+            <div class="hint">点击开启</div>
+        </div>
+    </div>
+
+    <div id="temp-slots">
+        <div class="temp-slot"></div>
+        <div class="temp-slot"></div>
+        <div class="temp-slot"></div>
+        <div class="temp-slot"></div>
+        <div class="temp-slot"></div>
+    </div>
+
+    <div id="game-board"></div>
+
+    <div id="message"></div>
+
+    <script>
+        const COLORS = ["red", "blue", "green", "yellow", "purple"];
+        const ROWS = 30;
+        const COLS = 20;
+        const MAX_ACTIVATED_CELLS = 200;
+
+        const board = document.getElementById("game-board");
+        const boxes = document.querySelectorAll(".box");
+        const tempSlots = document.querySelectorAll(".temp-slot");
+        const message = document.getElementById("message");
+
+        const cellMap = [];
+        let activeCells = [];
+        let usedBoxColors = new Set();
+
+        function createGrid() {
+            for (let row = 0; row < ROWS; row++) {
+                cellMap[row] = [];
+                for (let col = 0; col < COLS; col++) {
+                    const cell = document.createElement("div");
+                    cell.className = "cell";
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    board.appendChild(cell);
+                    cellMap[row][col] = cell;
+                }
+            }
+        }
+
+        function activateCells() {
+            const allCells = [];
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    allCells.push(cellMap[row][col]);
+                }
+            }
+
+            activeCells = [];
+            const used = new Set();
+            while (activeCells.length < MAX_ACTIVATED_CELLS) {
+                const index = Math.floor(Math.random() * allCells.length);
+                const cell = allCells[index];
+                const key = `${cell.dataset.row}-${cell.dataset.col}`;
+                if (!used.has(key)) {
+                    used.add(key);
+                    cell.style.backgroundColor = "#fff8dc";
+                    activeCells.push(cell);
+                }
+            }
+        }
+
+        function setupBox(box) {
+            const availableColors = COLORS.filter(c => !usedBoxColors.has(c));
+            if (availableColors.length === 0) return;
+
+            const color = availableColors[Math.floor(Math.random() * availableColors.length)];
+            const availableCells = activeCells.filter(cell => cell.children.length === 0);
+            if (availableCells.length < 3) {
+                showMessage("⚠️ 可用格子不足，无法生成圆点！");
+                return;
+            }
+
+            for (let i = 0; i < 3; i++) {
+                const index = Math.floor(Math.random() * availableCells.length);
+                const cell = availableCells.splice(index, 1)[0];
+
+                const dot = document.createElement("div");
+                dot.className = "dot";
+                dot.style.backgroundColor = color;
+                dot.dataset.color = color;
+                dot.addEventListener("click", () => handleDotClick(dot));
+                cell.appendChild(dot);
+            }
+
+            box.dataset.color = color;
+            box.dataset.enabled = "true";
+            box.classList.add("enabled");
+            box.style.borderColor = color;
+            box.innerHTML = "";
+            usedBoxColors.add(color);
+
+            for (let i = 0; i < 3; i++) {
+                const slot = document.createElement("div");
+                slot.className = "slot";
+                box.appendChild(slot);
+            }
+
+            absorbTempDots(color, box);
+        }
+
+        function absorbTempDots(color, box) {
+            const matchingDots = [];
+            tempSlots.forEach(temp => {
+                if (temp.children.length > 0) {
+                    const tempDot = temp.children[0];
+                    if (tempDot.dataset.color === color) {
+                        matchingDots.push(tempDot);
+                    }
+                }
+            });
+
+            if (matchingDots.length >= 3) {
+                for (let i = 0; i < 3; i++) {
+                    matchingDots[i].remove();
+                }
+                setTimeout(() => {
+                    usedBoxColors.delete(color);
+                    setupBox(box);
+                    showMessage("🎉 自动三消！");
+                    ensureDotCount();
+                    setTimeout(() => showMessage(""), 1500);
+                }, 300);
+            } else {
+                for (let dot of matchingDots) {
+                    const emptySlot = [...box.children].find(s => s.className === "slot" && !s.dataset.filled);
+                    if (emptySlot) {
+                        const newDot = document.createElement("div");
+                        newDot.className = "slot";
+                        newDot.style.backgroundColor = color;
+                        newDot.dataset.color = color;
+                        newDot.dataset.filled = "true";
+                        emptySlot.replaceWith(newDot);
+                        dot.remove();
+                    }
+                }
+            }
+        }
+
+        function placeDots(count) {
+            const availableCells = activeCells.filter(cell => cell.children.length === 0);
+            const maxToPlace = Math.min(count, availableCells.length);
+            for (let i = 0; i < maxToPlace; i++) {
+                const index = Math.floor(Math.random() * availableCells.length);
+                const cell = availableCells.splice(index, 1)[0];
+
+                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                const dot = document.createElement("div");
+                dot.className = "dot";
+                dot.style.backgroundColor = color;
+                dot.dataset.color = color;
+                dot.addEventListener("click", () => handleDotClick(dot));
+                cell.appendChild(dot);
+            }
+        }
+
+        function ensureDotCount() {
+            setTimeout(() => {
+                const current = document.querySelectorAll("#game-board .dot").length;
+                const targetMin = 9;
+                const targetMax = 15;
+
+                if (current < targetMin) {
+                    const toAdd = Math.min(targetMin - current, activeCells.filter(c => c.children.length === 0).length);
+                    placeDots(toAdd);
+                }
+                // 如果 >=15 就不生成；在 9~14 之间保持不动
+            }, 100);
+        }
+
+        function handleDotClick(dot) {
+            const color = dot.dataset.color;
+            for (const box of boxes) {
+                if (box.dataset.enabled !== "true") continue;
+                if (box.dataset.color !== color) continue;
+
+                const emptySlot = [...box.children].find(el => el.className === "slot" && !el.dataset.filled);
+                if (emptySlot) {
+                    const newDot = document.createElement("div");
+                    newDot.className = "slot";
+                    newDot.style.backgroundColor = color;
+                    newDot.dataset.color = color;
+                    newDot.dataset.filled = "true";
+                    emptySlot.replaceWith(newDot);
+                    dot.remove();
+                    ensureDotCount();
+
+                    const filled = [...box.children].filter(s => s.dataset.color === color).length;
+                    if (filled === 3) {
+                        setTimeout(() => {
+                            usedBoxColors.delete(box.dataset.color);
+                            setupBox(box);
+                            showMessage("🎉 三消成功！");
+                            ensureDotCount();
+                            setTimeout(() => showMessage(""), 1500);
+                        }, 300);
+                    }
+                    return;
+                }
+            }
+
+            for (const temp of tempSlots) {
+                if (temp.children.length === 0) {
+                    temp.appendChild(dot);
+                    dot.style.position = "absolute";
+                    return;
+                }
+            }
+
+            showMessage("💥 游戏失败！临时槽已满！");
+        }
+
+        function initBoxes() {
+            usedBoxColors.clear();
+            boxes.forEach((box, i) => {
+                box.innerHTML = "";
+                if (box.dataset.enabled === "true") {
+                    setupBox(box);
+                } else {
+                    const hint = document.createElement("div");
+                    hint.className = "hint";
+                    hint.textContent = "点击开启";
+                    box.appendChild(hint);
+                    box.style.borderColor = "#ccc";
+                    box.addEventListener("click", () => {
+                        setupBox(box);
+                        box.querySelector(".hint")?.remove();
+                    });
+                }
+            });
+        }
+
+        function showMessage(msg) {
+            message.textContent = msg;
+        }
+
+        createGrid();
+        activateCells();
+        initBoxes();
+        ensureDotCount(); // ✅ 自动控制数量在 9~15
+
+    </script>
+</body>
+
+</html>
