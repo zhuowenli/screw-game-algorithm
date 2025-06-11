@@ -259,12 +259,20 @@
                     cell.style.backgroundColor = "#fff8dc";
                     activeCells.push(cell);
                 }
-            }
-        }
+            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            tempSlots.forEach(t => {
+                if (t.children.length > 0) {
+                    const c = t.children[0].dataset.color;
+                    tempCounts[c]++;
+                }
+            });
 
-        function spawnDot(color, cell) {
-            const dot = document.createElement("div");
-            dot.className = "dot";
+            const availableColors = COLORS.filter(c =>
+                !usedBoxColors.has(c) &&
+                boxPool[c] > 0 &&
+                (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
+            );
+
             dot.style.backgroundColor = color;
             dot.dataset.color = color;
             dot.addEventListener("click", () => handleDotClick(dot));
