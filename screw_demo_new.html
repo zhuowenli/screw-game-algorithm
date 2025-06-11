@@ -190,6 +190,9 @@
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
         const TOTAL_SCREWS = 90;
+        const MIN_ONFIELD = 15;
+        const MAX_ONFIELD = 21;
+        let lastRemovedCell = null;
 
         // 螺丝生成算法：每3个螺丝随机生成一个颜色，直到生成TOTAL_SCREWS个螺丝
         const COLOR_TOTALS = Array(TOTAL_SCREWS)
@@ -319,10 +322,11 @@
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
             boxPool[color]--;
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
-            const createCount = Math.min(3, colorPool[color], availableCells.length);
-            for (let i = 0; i < createCount; i++) {
-                const index = Math.floor(Math.random() * availableCells.length);
-                const cell = availableCells.splice(index, 1)[0];
+            const current = document.querySelectorAll("#game-board .dot").length;
+            const maxSpawn = Math.max(0, MAX_ONFIELD - current);
+            const createCount = Math.min(3, colorPool[color], availableCells.length, maxSpawn);
+            const cells = chooseSpawnCells(createCount, availableCells);
+            for (const cell of cells) {
                 spawnDot(color, cell);
             }
 
@@ -385,15 +389,44 @@
             }
         }
 
+        function distance(a, b) {
+            const dr = a.dataset.row - b.dataset.row;
+            const dc = a.dataset.col - b.dataset.col;
+            return dr * dr + dc * dc;
+        }
+
+        function chooseSpawnCells(count, cells) {
+            const result = [];
+            if (cells.length === 0) return result;
+            if (!lastRemovedCell) {
+                for (let i = 0; i < count && cells.length > 0; i++) {
+                    const idx = Math.floor(Math.random() * cells.length);
+                    result.push(cells.splice(idx, 1)[0]);
+                }
+                return result;
+            }
+            cells.sort((a, b) => {
+                const da = distance(a, lastRemovedCell);
+                const db = distance(b, lastRemovedCell);
+                if (da !== db) return da - db;
+                const idA = parseInt(a.dataset.row) * COLS + parseInt(a.dataset.col);
+                const idB = parseInt(b.dataset.row) * COLS + parseInt(b.dataset.col);
+                return idA - idB;
+            });
+            for (let i = 0; i < count && cells.length > 0; i++) {
+                result.push(cells[i]);
+            }
+            return result;
+        }
+
         function placeDots(count) {
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
             const maxToPlace = Math.min(count, availableCells.length);
-            for (let i = 0; i < maxToPlace; i++) {
+            const cells = chooseSpawnCells(maxToPlace, availableCells);
+            for (const cell of cells) {
                 const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
                 if (colorsCanUse.length === 0) return;
                 const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
-                const index = Math.floor(Math.random() * availableCells.length);
-                const cell = availableCells.splice(index, 1)[0];
                 spawnDot(color, cell);
             }
         }
@@ -405,11 +438,10 @@
         function ensureDotCount() {
             setTimeout(() => {
                 const current = document.querySelectorAll("#game-board .dot").length;
-                const target = 15;
                 const remaining = totalRemainingPool();
-                if (current < target && remaining > 0) {
+                if (current < MIN_ONFIELD && remaining > 0) {
                     const free = activeCells.filter(c => c.children.length === 0).length;
-                    const toAdd = Math.min(target - current, remaining, free);
+                    const toAdd = Math.min(MIN_ONFIELD - current, remaining, free, MAX_ONFIELD - current);
                     placeDots(toAdd);
                 }
                 updateInfo();
@@ -425,6 +457,7 @@
 
                 const emptySlot = [...box.children].find(el => el.className === "slot" && !el.dataset.filled);
                 if (emptySlot) {
+                    const fromCell = dot.parentElement;
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
                     newDot.style.backgroundColor = color;
@@ -432,6 +465,7 @@
                     newDot.dataset.filled = "true";
                     emptySlot.replaceWith(newDot);
                     dot.remove();
+                    lastRemovedCell = fromCell;
                     ensureDotCount();
                     updateInfo();
                     checkVictory();
@@ -454,8 +488,10 @@
 
             for (const temp of tempSlots) {
                 if (temp.children.length === 0) {
+                    const fromCell = dot.parentElement;
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
+                    lastRemovedCell = fromCell;
                     updateInfo();
                     checkVictory();
                     return;
@@ -530,7 +566,7 @@
         createGrid();
         activateCells();
         initBoxes();
-        ensureDotCount(); // ✅ 自动控制数量在 9~15
+        ensureDotCount(); // ✅ 自动控制数量在 15~21
     </script>
 </body>
 
