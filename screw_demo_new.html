@@ -249,7 +249,7 @@
         let usedBoxColors = new Set();
         let plateQueue = [];
         let activePlates = [];
-        let nextPlateZ = 1; // 记录下一个板块的 zIndex，用于叠放顺序
+        let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
 
         function createGrid() {
             for (let row = 0; row < ROWS; row++) {
@@ -358,7 +358,7 @@
             board.appendChild(overlay);
             plate.overlay = overlay;
             plate.zIndex = nextPlateZ;
-            nextPlateZ += 2; // 保证后生成的板块位于更上层
+            nextPlateZ -= 2; // 每次减 2，确保新板块位于更底层
             activePlates.push(plate);
             for (const cell of plate.cells) {
                 const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
