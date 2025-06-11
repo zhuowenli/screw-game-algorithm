@@ -374,9 +374,8 @@
             overlay.style.height = plate.height * 32 - 2 + 'px';
             overlay.style.zIndex = plate.zIndex;
             board.appendChild(overlay);
-            plate.overlay = overlay;
-            activePlates.push(plate);
             const used = new Set();
+            let placed = 0;
             for (const screw of plate.screws) {
                 let cell = cellMap[screw.row][screw.col];
                 if (cell.querySelector('.dot')) {
@@ -399,8 +398,16 @@
                 const dot = spawnDot(screw.color, cell);
                 dot.style.zIndex = plate.zIndex + 1;
                 screw.dot = dot;
+                placed++;
             }
+            if (placed === 0) {
+                overlay.remove();
+                return false;
+            }
+            plate.overlay = overlay;
+            activePlates.push(plate);
             updateDotBlockStates();
+            return true;
         }
 
        function removePlate(plate) {
@@ -441,10 +448,12 @@
         }
 
         function spawnNextPlate() {
-            if (nextPlateIndex >= plates.length) return;
-            if (activePlates.length >= MAX_VISIBLE_PLATES) return;
-            const next = plates[nextPlateIndex++];
-            spawnPlate(next);
+            while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
+                const next = plates[nextPlateIndex++];
+                if (spawnPlate(next)) {
+                    break;
+                }
+            }
         }
 
         function checkPlateRemoval(cell) {
