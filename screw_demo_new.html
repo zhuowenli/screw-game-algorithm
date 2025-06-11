@@ -293,32 +293,43 @@
         function generatePlates() {
             let remaining = TOTAL_SCREWS;
             let id = 0;
-            const tempPool = { ...COLOR_TOTALS };
+            const tempPool = {
+                ...COLOR_TOTALS
+            };
             while (remaining > 0) {
                 const screwCount = Math.min(remaining, Math.floor(Math.random() * 9) + 1);
-            const width = Math.floor(Math.random() * 6) + 3;
-            const height = Math.floor(Math.random() * 6) + 3;
-            const row = Math.floor(Math.random() * (ROWS - height));
-            const col = Math.floor(Math.random() * (COLS - width));
-            const cells = [];
-            for (let r = row; r < row + height; r++) {
-                for (let c = col; c < col + width; c++) {
-                    cells.push({ row: r, col: c });
+                const width = Math.floor(Math.random() * 6) + 3;
+                const height = Math.floor(Math.random() * 6) + 3;
+                const row = Math.floor(Math.random() * (ROWS - height));
+                const col = Math.floor(Math.random() * (COLS - width));
+                const cells = [];
+                for (let r = row; r < row + height; r++) {
+                    for (let c = col; c < col + width; c++) {
+                        cells.push({
+                            row: r,
+                            col: c
+                        });
+                    }
                 }
-            }
                 for (let i = cells.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [cells[i], cells[j]] = [cells[j], cells[i]];
                 }
-            const plateCells = cells.slice(0, screwCount);
-            const screws = [];
-            for (const pos of plateCells) {
-                const colorsCanUse = COLORS.filter(c => tempPool[c] > 0);
-                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
-                screws.push({ row: pos.row, col: pos.col, color, cell: null, dot: null });
-                tempPool[color]--;
-                remaining--;
-            }
+                const plateCells = cells.slice(0, screwCount);
+                const screws = [];
+                for (const pos of plateCells) {
+                    const colorsCanUse = COLORS.filter(c => tempPool[c] > 0);
+                    const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
+                    screws.push({
+                        row: pos.row,
+                        col: pos.col,
+                        color,
+                        cell: null,
+                        dot: null
+                    });
+                    tempPool[color]--;
+                    remaining--;
+                }
                 plates.push({
                     id: id++,
                     row,
@@ -346,9 +357,9 @@
             return dot;
         }
 
-       function removeDot(dot) {
-           const color = dot.dataset.color;
-           const cell = dot.parentElement;
+        function removeDot(dot) {
+            const color = dot.dataset.color;
+            const cell = dot.parentElement;
             const pid = cell && cell.dataset.plateId;
             if (pid) {
                 const plate = activePlates.find(p => p.id == pid);
@@ -361,7 +372,7 @@
             colorOnField[color]--;
             eliminated++;
             if (cell) checkPlateRemoval(cell);
-       }
+        }
 
         // 在场景中生成一个板块及其螺丝
         function spawnPlate(plate) {
@@ -410,31 +421,31 @@
             return true;
         }
 
-       function removePlate(plate) {
-           plate.overlay && plate.overlay.remove();
-           for (const screw of plate.screws) {
-               if (screw.dot) screw.dot.remove();
-               if (screw.cell) screw.cell.dataset.plateId = '';
-               }
-           activePlates = activePlates.filter(p => p !== plate);
-           updateDotBlockStates();
-       }
+        function removePlate(plate) {
+            plate.overlay && plate.overlay.remove();
+            for (const screw of plate.screws) {
+                if (screw.dot) screw.dot.remove();
+                if (screw.cell) screw.cell.dataset.plateId = '';
+            }
+            activePlates = activePlates.filter(p => p !== plate);
+            updateDotBlockStates();
+        }
 
         // 根据当前板块层级，控制螺丝的可点击状态
-       function updateDotBlockStates() {
-           const topMap = {};
-           // 计算每个格子上方覆盖的最高板块
-           const sorted = [...activePlates].sort((a, b) => a.zIndex - b.zIndex);
-           for (const plate of sorted) {
+        function updateDotBlockStates() {
+            const topMap = {};
+            // 计算每个格子上方覆盖的最高板块
+            const sorted = [...activePlates].sort((a, b) => a.zIndex - b.zIndex);
+            for (const plate of sorted) {
                 for (let r = plate.row; r < plate.row + plate.height; r++) {
                     for (let c = plate.col; c < plate.col + plate.width; c++) {
                         const key = `${r}-${c}`;
                         topMap[key] = plate;
                     }
                 }
-           }
+            }
 
-           // 设置螺丝是否可点击
+            // 设置螺丝是否可点击
             for (const plate of activePlates) {
                 for (const screw of plate.screws) {
                     if (!screw.dot || !screw.cell) continue;
@@ -461,7 +472,7 @@
             if (!pid) return;
             const plate = activePlates.find(p => p.id == pid);
             if (!plate) return;
-            const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot'));
+            const hasDot = plate.screws.some(s => s.cell && s.dot);
             if (!hasDot) {
                 removePlate(plate);
                 spawnNextPlate();
@@ -570,7 +581,7 @@
         }
 
 
-       function handleDotClick(dot) {
+        function handleDotClick(dot) {
             if (dot.dataset.blocked === "true") return;
             const color = dot.dataset.color;
             for (const box of boxes) {
