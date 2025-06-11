@@ -31,7 +31,6 @@
             position: absolute;
             pointer-events: none;
             border-radius: 4px;
-            z-index: 1;
         }
 
         .dot {
@@ -246,6 +245,7 @@
         let usedBoxColors = new Set();
         let plateQueue = [];
         let activePlates = [];
+        let nextPlateZ = 1; // 记录下一个板块的 zIndex，用于叠放顺序
 
         function createGrid() {
             for (let row = 0; row < ROWS; row++) {
@@ -328,6 +328,7 @@
             cell.appendChild(dot);
             colorPool[color]--;
             colorOnField[color]++;
+            return dot;
         }
 
         function removeDot(dot) {
@@ -348,22 +349,51 @@
             overlay.style.top = plate.row * 32 + 'px';
             overlay.style.width = plate.width * 32 - 2 + 'px';
             overlay.style.height = plate.height * 32 - 2 + 'px';
-            overlay.style.zIndex = activePlates.length + 1;
+            overlay.style.zIndex = nextPlateZ;
             board.appendChild(overlay);
             plate.overlay = overlay;
+            plate.zIndex = nextPlateZ;
+            nextPlateZ += 2; // 保证后生成的板块位于更上层
             activePlates.push(plate);
             for (const cell of plate.cells) {
                 const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
                 if (colorsCanUse.length === 0) break;
                 const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
                 cell.dataset.plateId = plate.id;
-                spawnDot(color, cell);
+                const dot = spawnDot(color, cell);
+                dot.style.zIndex = plate.zIndex + 1;
             }
+            updateDotBlockStates();
         }
 
-        function removePlate(plate) {
-            plate.overlay && plate.overlay.remove();
-            activePlates = activePlates.filter(p => p !== plate);
+       function removePlate(plate) {
+           plate.overlay && plate.overlay.remove();
+           activePlates = activePlates.filter(p => p !== plate);
+           updateDotBlockStates();
+       }
+
+        // 根据当前板块层级，控制螺丝的可点击状态
+        function updateDotBlockStates() {
+            const topMap = {};
+            // 计算每个格子上方覆盖的最高板块
+            const sorted = [...activePlates].sort((a, b) => a.zIndex - b.zIndex);
+            for (const plate of sorted) {
+                for (const cell of plate.cells) {
+                    const key = `${cell.dataset.row}-${cell.dataset.col}`;
+                    topMap[key] = plate;
+                }
+            }
+
+            // 设置螺丝是否可点击
+            for (const plate of activePlates) {
+                for (const cell of plate.cells) {
+                    const key = `${cell.dataset.row}-${cell.dataset.col}`;
+                    const dot = cell.querySelector('.dot');
+                    if (!dot) continue;
+                    const top = topMap[key];
+                    dot.style.pointerEvents = top && top.id === plate.id ? 'auto' : 'none';
+                }
+            }
         }
 
         function spawnNextPlate() {
