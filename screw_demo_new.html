@@ -130,7 +130,6 @@
         #color-stats div {
             margin-top: 2px;
         }
-
         #message {
             margin-top: 20px;
             font-size: 1.2em;
@@ -167,6 +166,7 @@
         <div>未消除螺丝数:<span id="remaining-count">0</span></div>
         <div>场上螺丝数:<span id="onboard-count">0</span></div>
         <div>队列中螺丝数:<span id="queue-count">0</span></div>
+        <div>颜色种类:<span id="color-count">0</span></div>
         <div id="color-stats"></div>
     </div>
 
@@ -208,6 +208,7 @@
         const remainingCountEl = document.getElementById("remaining-count");
         const onboardCountEl = document.getElementById("onboard-count");
         const queueCountEl = document.getElementById("queue-count");
+        const colorCountEl = document.getElementById("color-count");
         const colorStats = document.getElementById("color-stats");
 
         const cellMap = [];
@@ -475,6 +476,10 @@
             remainingCountEl.textContent = remaining;
             onboardCountEl.textContent = onBoard;
             queueCountEl.textContent = queue;
+            const dots = document.querySelectorAll("#game-board .dot");
+            const colors = new Set();
+            dots.forEach(d => colors.add(d.dataset.color));
+            colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
                 const count = colorPool[c] + colorOnField[c];
                 return `<div style="color:${c}">${COLOR_NAMES[c]}:<span>${count}</span></div>`;
