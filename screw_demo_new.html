@@ -110,13 +110,25 @@
         }
 
         #info-panel {
-            margin: 10px auto;
+            position: fixed;
+            right: 20px;
+            top: 100px;
+            width: 200px;
+            text-align: left;
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
             font-size: 14px;
         }
 
         #info-panel span {
             font-weight: bold;
             margin-left: 5px;
+        }
+
+        #color-stats div {
+            margin-top: 2px;
         }
 
         #message {
@@ -150,8 +162,13 @@
     </div>
 
     <div id="info-panel">
-        颜色种类:<span id="color-count">0</span>
-        | 场上螺丝数量:<span id="dot-count">0</span>
+        <div>关卡总螺丝数:<span id="total-count"></span></div>
+        <div>已消除螺丝数:<span id="eliminated-count">0</span></div>
+        <div>未消除螺丝数:<span id="remaining-count">0</span></div>
+        <div>场上螺丝数:<span id="onboard-count">0</span></div>
+        <div>队列中螺丝数:<span id="queue-count">0</span></div>
+        <div>颜色种类:<span id="color-count">0</span></div>
+        <div id="color-stats"></div>
     </div>
 
     <div id="game-board"></div>
@@ -160,19 +177,42 @@
 
     <script>
         const COLORS = ["red", "blue", "green", "yellow", "purple"];
+        const COLOR_NAMES = {
+            red: "红色",
+            blue: "蓝色",
+            green: "绿色",
+            yellow: "黄色",
+            purple: "紫色"
+        };
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const TOTAL_SCREWS = 150;
+        const COLOR_TOTALS = {
+            red: 30,
+            blue: 30,
+            green: 30,
+            yellow: 30,
+            purple: 30
+        };
+        const TOTAL_SCREWS = Object.values(COLOR_TOTALS).reduce((a, b) => a + b, 0);
 
-        let remainingPool = TOTAL_SCREWS;
+        const colorPool = {
+            ...COLOR_TOTALS
+        };
+        const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
+        let eliminated = 0;
 
         const board = document.getElementById("game-board");
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
+        const totalCountEl = document.getElementById("total-count");
+        const eliminatedCountEl = document.getElementById("eliminated-count");
+        const remainingCountEl = document.getElementById("remaining-count");
+        const onboardCountEl = document.getElementById("onboard-count");
+        const queueCountEl = document.getElementById("queue-count");
         const colorCountEl = document.getElementById("color-count");
-        const dotCountEl = document.getElementById("dot-count");
+        const colorStats = document.getElementById("color-stats");
 
         const cellMap = [];
         let activeCells = [];
@@ -214,9 +254,41 @@
             }
         }
 
+        function spawnDot(color, cell) {
+            const dot = document.createElement("div");
+            dot.className = "dot";
+            dot.style.backgroundColor = color;
+            dot.dataset.color = color;
+            dot.addEventListener("click", () => handleDotClick(dot));
+            cell.appendChild(dot);
+            colorPool[color]--;
+            colorOnField[color]++;
+        }
+
+        function removeDot(dot) {
+            const color = dot.dataset.color;
+            dot.remove();
+            colorOnField[color]--;
+            eliminated++;
+        }
+
         function setupBox(box) {
-            const availableColors = COLORS.filter(c => !usedBoxColors.has(c));
-            if (availableColors.length === 0) return;
+            // clear previous filled dots and count them as eliminated
+            [...box.children].forEach(child => {
+                if (child.dataset.filled) {
+                    colorOnField[child.dataset.color]--;
+                    eliminated++;
+                }
+            });
+
+            const availableColors = COLORS.filter(c => !usedBoxColors.has(c) && colorPool[c] > 0);
+            if (availableColors.length === 0) {
+                box.dataset.enabled = "false";
+                box.classList.remove("enabled");
+                box.style.borderColor = "#ccc";
+                box.innerHTML = "";
+                return;
+            }
 
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
@@ -225,19 +297,12 @@
                 return;
             }
 
-            const createCount = Math.min(3, remainingPool, availableCells.length);
+            const createCount = Math.min(3, colorPool[color], availableCells.length);
             for (let i = 0; i < createCount; i++) {
                 const index = Math.floor(Math.random() * availableCells.length);
                 const cell = availableCells.splice(index, 1)[0];
-
-                const dot = document.createElement("div");
-                dot.className = "dot";
-                dot.style.backgroundColor = color;
-                dot.dataset.color = color;
-                dot.addEventListener("click", () => handleDotClick(dot));
-                cell.appendChild(dot);
+                spawnDot(color, cell);
             }
-            remainingPool -= createCount;
 
             box.dataset.color = color;
             box.dataset.enabled = "true";
@@ -269,7 +334,7 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
-                    matchingDots[i].remove();
+                    removeDot(matchingDots[i]);
                 }
                 setTimeout(() => {
                     usedBoxColors.delete(color);
@@ -302,28 +367,28 @@
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
             const maxToPlace = Math.min(count, availableCells.length);
             for (let i = 0; i < maxToPlace; i++) {
+                const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
+                if (colorsCanUse.length === 0) return;
+                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
                 const index = Math.floor(Math.random() * availableCells.length);
                 const cell = availableCells.splice(index, 1)[0];
-
-                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                const dot = document.createElement("div");
-                dot.className = "dot";
-                dot.style.backgroundColor = color;
-                dot.dataset.color = color;
-                dot.addEventListener("click", () => handleDotClick(dot));
-                cell.appendChild(dot);
+                spawnDot(color, cell);
             }
+        }
+
+        function totalRemainingPool() {
+            return COLORS.reduce((s, c) => s + colorPool[c], 0);
         }
 
         function ensureDotCount() {
             setTimeout(() => {
                 const current = document.querySelectorAll("#game-board .dot").length;
                 const target = 15;
-                if (current < target && remainingPool > 0) {
+                const remaining = totalRemainingPool();
+                if (current < target && remaining > 0) {
                     const free = activeCells.filter(c => c.children.length === 0).length;
-                    const toAdd = Math.min(target - current, remainingPool, free);
+                    const toAdd = Math.min(target - current, remaining, free);
                     placeDots(toAdd);
-                    remainingPool -= toAdd;
                 }
                 updateInfo();
                 checkVictory();
@@ -393,7 +458,7 @@
                     box.style.borderColor = "#ccc";
                     box.addEventListener("click", () => {
                         setupBox(box);
-                        box.querySelector(".hint")?.remove();
+                        box.querySelector(".hint") && box.querySelector(".hint").remove();
                     });
                 }
             });
@@ -404,11 +469,24 @@
         }
 
         function updateInfo() {
+            totalCountEl.textContent = TOTAL_SCREWS;
+            eliminatedCountEl.textContent = eliminated;
+            const queue = totalRemainingPool();
+            const onBoard = document.querySelectorAll("#game-board .dot").length;
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            const remaining = queue + boxDots + tempDots + onBoard;
+            remainingCountEl.textContent = remaining;
+            onboardCountEl.textContent = onBoard;
+            queueCountEl.textContent = queue;
             const dots = document.querySelectorAll("#game-board .dot");
             const colors = new Set();
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
-            dotCountEl.textContent = dots.length;
+            colorStats.innerHTML = COLORS.map(c => {
+                const count = colorPool[c] + colorOnField[c];
+                return `<div style="color:${c}">${COLOR_NAMES[c]}:<span>${count}</span></div>`;
+            }).join("");
         }
 
         function disableGame() {
@@ -420,7 +498,7 @@
             const boardDots = document.querySelectorAll('#game-board .dot').length;
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
             const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
-            if (boardDots === 0 && boxDots === 0 && tempDots === 0 && remainingPool === 0) {
+            if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
                 showMessage('🏆 游戏胜利！');
                 disableGame();
             }
@@ -430,7 +508,6 @@
         activateCells();
         initBoxes();
         ensureDotCount(); // ✅ 自动控制数量在 9~15
-
     </script>
 </body>
 
