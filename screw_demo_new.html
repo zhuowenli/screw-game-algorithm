@@ -407,6 +407,7 @@
             const screw = screwMap[dot.dataset.sid];
             if (screw) screw.dot = null;
             lockConnections.slice().forEach(conn => {
+            cleanupOrphanLocks();
                 if (conn.controller.id === screw.id || conn.locked.id === screw.id) removeConnection(conn);
             });
             dot.remove();
@@ -472,7 +473,7 @@
                 if (screw.cell) screw.cell.dataset.plateId = '';
             }
             activePlates = activePlates.filter(p => p !== plate);
-            updateDotBlockStates();
+            cleanupOrphanLocks();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
@@ -502,9 +503,30 @@
             }
         }
 
+        function cleanupOrphanLocks() {
+            for (const id in screwMap) {
+                const s = screwMap[id];
+                if (s.locked) {
+                    const hasConn = lockConnections.some(c => c.locked === s || c.controller === s);
+                    if (!hasConn) {
+                        s.locked = false;
+                        s.controller = null;
+                        s.controls = null;
+                        if (s.overlay) { s.overlay.remove(); s.overlay = null; }
+                        if (s.dot) {
+                            s.dot.dataset.blocked = 'false';
+                            s.dot.classList.remove('blocked');
+                        }
+                    }
+                }
+            }
+            updateDotBlockStates();
+        }
+
         function getDotCenter(dot) {
             const br = board.getBoundingClientRect();
             const dr = dot.getBoundingClientRect();
+            cleanupOrphanLocks();
             return {
                 x: dr.left - br.left + dr.width / 2,
                 y: dr.top - br.top + dr.height / 2
@@ -705,6 +727,8 @@
                     if (emptySlot) {
                         const newDot = document.createElement("div");
                         newDot.className = "slot";
+                    cleanupOrphanLocks();
+                    cleanupOrphanLocks();
                         newDot.style.backgroundColor = color;
                         newDot.dataset.color = color;
                         newDot.dataset.filled = "true";
