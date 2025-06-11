@@ -504,20 +504,41 @@
         }
 
         function cleanupOrphanLocks() {
+            const connectedControllers = new Set();
+            const connectedLocked = new Set();
+
+            lockConnections = lockConnections.filter(conn => {
+                const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
+                if (valid) {
+                    connectedControllers.add(conn.controller);
+                    connectedLocked.add(conn.locked);
+                    return true;
+                }
+                conn.line && conn.line.remove();
+                if (conn.locked.overlay) { conn.locked.overlay.remove(); conn.locked.overlay = null; }
+                if (conn.locked.dot) {
+                    conn.locked.dot.dataset.blocked = 'false';
+                    conn.locked.dot.classList.remove('blocked');
+                }
+                conn.locked.locked = false;
+                conn.locked.controller = null;
+                conn.controller.controls = null;
+                return false;
+            });
+
             for (const id in screwMap) {
                 const s = screwMap[id];
-                if (s.locked) {
-                    const hasConn = lockConnections.some(c => c.locked === s || c.controller === s);
-                    if (!hasConn) {
-                        s.locked = false;
-                        s.controller = null;
-                        s.controls = null;
-                        if (s.overlay) { s.overlay.remove(); s.overlay = null; }
-                        if (s.dot) {
-                            s.dot.dataset.blocked = 'false';
-                            s.dot.classList.remove('blocked');
-                        }
+                if (s.locked && !connectedLocked.has(s)) {
+                    s.locked = false;
+                    s.controller = null;
+                    if (s.overlay) { s.overlay.remove(); s.overlay = null; }
+                    if (s.dot) {
+                        s.dot.dataset.blocked = 'false';
+                        s.dot.classList.remove('blocked');
                     }
+                }
+                if (s.controls && !connectedControllers.has(s)) {
+                    s.controls = null;
                 }
             }
             updateDotBlockStates();
