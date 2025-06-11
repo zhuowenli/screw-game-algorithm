@@ -729,10 +729,14 @@
                     const fromCell = dot.parentElement;
                     const pid = fromCell.dataset.plateId;
                     const plate = activePlates.find(p => p.id == pid);
+                    let screw = null;
                     if (plate) {
-                        const target = plate.screws.find(s => s.dot === dot);
-                        if (target) target.dot = null;
+                        screw = plate.screws.find(s => s.dot === dot);
+                        if (screw) screw.dot = null;
                     }
+                    lockConnections.slice().forEach(conn => {
+                        if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                    });
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
                     newDot.style.backgroundColor = color;
@@ -766,10 +770,14 @@
                     const fromCell = dot.parentElement;
                     const pid = fromCell.dataset.plateId;
                     const plate = activePlates.find(p => p.id == pid);
+                    let screw = null;
                     if (plate) {
-                        const target = plate.screws.find(s => s.dot === dot);
-                        if (target) target.dot = null;
+                        screw = plate.screws.find(s => s.dot === dot);
+                        if (screw) screw.dot = null;
                     }
+                    lockConnections.slice().forEach(conn => {
+                        if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                    });
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
                     // 记录本次拔出的格子，供生成算法使用
