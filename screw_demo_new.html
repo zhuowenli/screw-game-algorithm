@@ -115,8 +115,8 @@
             top: 100px;
             width: 200px;
             text-align: left;
-            background: #fff;
-            border: 1px solid #ccc;
+            background: #ccc;
+            border: 1px solid #aaa;
             padding: 10px;
             box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
             font-size: 14px;
@@ -176,28 +176,41 @@
     <div id="message"></div>
 
     <script>
-        const COLORS = ["red", "blue", "green", "yellow", "purple"];
+        const COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink"];
         const COLOR_NAMES = {
             red: "红色",
             blue: "蓝色",
             green: "绿色",
             yellow: "黄色",
-            purple: "紫色"
+            purple: "紫色",
+            orange: "橙色",
+            pink: "粉色"
         };
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const COLOR_TOTALS = {
-            red: 30,
-            blue: 30,
-            green: 30,
-            yellow: 30,
-            purple: 30
-        };
-        const TOTAL_SCREWS = Object.values(COLOR_TOTALS).reduce((a, b) => a + b, 0);
+        const TOTAL_SCREWS = 90;
+
+        // 螺丝生成算法：每3个螺丝随机生成一个颜色，直到生成TOTAL_SCREWS个螺丝
+        const COLOR_TOTALS = Array(TOTAL_SCREWS)
+            .fill(0)
+            .map((_, i) => i)
+            .reduce((acc, i) => {
+                if (i % 3 === 0) {
+                    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    acc[color] = acc[color] ? acc[color] + 3 : 3;
+                }
+                return acc;
+            }, {});
+        const COLOR_BOX_TOTALS = Object.fromEntries(
+            Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
+        );
 
         const colorPool = {
             ...COLOR_TOTALS
+        };
+        const boxPool = {
+            ...COLOR_BOX_TOTALS
         };
         const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
         let eliminated = 0;
@@ -281,7 +294,20 @@
                 }
             });
 
-            const availableColors = COLORS.filter(c => !usedBoxColors.has(c) && colorPool[c] > 0);
+            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            tempSlots.forEach(t => {
+                if (t.children.length > 0) {
+                    const c = t.children[0].dataset.color;
+                    tempCounts[c]++;
+                }
+            });
+
+            const availableColors = COLORS.filter(c =>
+                !usedBoxColors.has(c) &&
+                boxPool[c] > 0 &&
+                (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
+            );
+
             if (availableColors.length === 0) {
                 box.dataset.enabled = "false";
                 box.classList.remove("enabled");
@@ -291,12 +317,8 @@
             }
 
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
+            boxPool[color]--;
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
-            if (availableCells.length < 3) {
-                showMessage("⚠️ 可用格子不足，无法生成圆点！");
-                return;
-            }
-
             const createCount = Math.min(3, colorPool[color], availableCells.length);
             for (let i = 0; i < createCount; i++) {
                 const index = Math.floor(Math.random() * availableCells.length);
@@ -484,8 +506,9 @@
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
-                const count = colorPool[c] + colorOnField[c];
-                return `<div style="color:${c}">${COLOR_NAMES[c]}:<span>${count}</span></div>`;
+                const screws = colorPool[c] + colorOnField[c];
+                const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
+                return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
             }).join("");
         }
 
