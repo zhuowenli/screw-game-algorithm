@@ -247,7 +247,8 @@
         const cellMap = [];
         let activeCells = [];
         let usedBoxColors = new Set();
-        let plateQueue = [];
+        let plates = [];
+        let nextPlateIndex = 0; // 下一个需要显示的板块索引
         let activePlates = [];
         // 控制板块与螺丝的层级，每层之间相差 10，方便调试
         let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
@@ -292,8 +293,8 @@
         function generatePlates() {
             let remaining = TOTAL_SCREWS;
             let id = 0;
+            const tempPool = { ...COLOR_TOTALS };
             while (remaining > 0) {
-                // 在剩余螺丝数和 1-9 之间取较小值，确保数量随机
                 const screwCount = Math.min(remaining, Math.floor(Math.random() * 9) + 1);
                 const width = Math.floor(Math.random() * 6) + 3;
                 const height = Math.floor(Math.random() * 6) + 3;
@@ -305,23 +306,30 @@
                         cells.push(cellMap[r][c]);
                     }
                 }
-                // 打乱并选取放置螺丝的格子
                 for (let i = cells.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [cells[i], cells[j]] = [cells[j], cells[i]];
                 }
                 const plateCells = cells.slice(0, screwCount);
-                plateQueue.push({
+                const screws = [];
+                for (const cell of plateCells) {
+                    const colorsCanUse = COLORS.filter(c => tempPool[c] > 0);
+                    const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
+                    screws.push({ cell, color });
+                    tempPool[color]--;
+                    remaining--;
+                }
+                plates.push({
                     id: id++,
                     row,
                     col,
                     width,
                     height,
-                    // 板块颜色带透明度，稍微加深以区分层级
                     color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.4)`,
-                    cells: plateCells
+                    screws,
+                    zIndex: nextPlateZ
                 });
-                remaining -= screwCount;
+                nextPlateZ -= 10;
             }
         }
 
@@ -349,14 +357,6 @@
 
         // 在场景中生成一个板块及其螺丝
         function spawnPlate(plate) {
-            // 过滤掉已存在螺丝的格子，避免同一位置出现多个螺丝
-            plate.cells = plate.cells.filter(c => !c.querySelector('.dot'));
-            // 若没有可用坑位，直接跳过该板块
-            if (plate.cells.length === 0) {
-                spawnNextPlate();
-                return;
-            }
-
             const overlay = document.createElement('div');
             overlay.className = 'plate';
             overlay.style.backgroundColor = plate.color;
@@ -364,25 +364,25 @@
             overlay.style.top = plate.row * 32 + 'px';
             overlay.style.width = plate.width * 32 - 2 + 'px';
             overlay.style.height = plate.height * 32 - 2 + 'px';
-            overlay.style.zIndex = nextPlateZ;
+            overlay.style.zIndex = plate.zIndex;
             board.appendChild(overlay);
             plate.overlay = overlay;
-            plate.zIndex = nextPlateZ;
-            nextPlateZ -= 10; // 每层相差 10，方便观察层级
             activePlates.push(plate);
-            for (const cell of plate.cells) {
-                const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
-                if (colorsCanUse.length === 0) break;
-                const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
-                cell.dataset.plateId = plate.id;
-                const dot = spawnDot(color, cell);
+            for (const screw of plate.screws) {
+                screw.cell.dataset.plateId = plate.id;
+                const dot = spawnDot(screw.color, screw.cell);
                 dot.style.zIndex = plate.zIndex + 1;
+                screw.dot = dot;
             }
             updateDotBlockStates();
         }
 
        function removePlate(plate) {
            plate.overlay && plate.overlay.remove();
+           for (const screw of plate.screws) {
+               if (screw.dot) screw.dot.remove();
+               screw.cell.dataset.plateId = '';
+           }
            activePlates = activePlates.filter(p => p !== plate);
            updateDotBlockStates();
        }
@@ -403,22 +403,22 @@
 
            // 设置螺丝是否可点击
            for (const plate of activePlates) {
-                for (const cell of plate.cells) {
+                for (const screw of plate.screws) {
+                    const cell = screw.cell;
                     const key = `${cell.dataset.row}-${cell.dataset.col}`;
-                    const dot = cell.querySelector('.dot');
-                    if (!dot) continue;
+                    if (!screw.dot) continue;
                     const top = topMap[key];
                     const blocked = !(top && top.id === plate.id);
-                    dot.dataset.blocked = blocked ? 'true' : 'false';
-                    dot.classList.toggle('blocked', blocked);
+                    screw.dot.dataset.blocked = blocked ? 'true' : 'false';
+                    screw.dot.classList.toggle('blocked', blocked);
                 }
             }
         }
 
         function spawnNextPlate() {
-            if (plateQueue.length === 0) return;
+            if (nextPlateIndex >= plates.length) return;
             if (activePlates.length >= MAX_VISIBLE_PLATES) return;
-            const next = plateQueue.shift();
+            const next = plates[nextPlateIndex++];
             spawnPlate(next);
         }
 
@@ -427,7 +427,7 @@
             if (!pid) return;
             const plate = activePlates.find(p => p.id == pid);
             if (!plate) return;
-            const hasDot = plate.cells.some(c => c.querySelector('.dot'));
+            const hasDot = plate.screws.some(s => s.cell.querySelector('.dot'));
             if (!hasDot) {
                 removePlate(plate);
                 spawnNextPlate();
@@ -451,11 +451,14 @@
                 }
             });
 
-            const availableColors = COLORS.filter(c =>
-                !usedBoxColors.has(c) &&
+            const candidateColors = COLORS.filter(c =>
                 boxPool[c] > 0 &&
                 (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
             );
+            let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
+            if (availableColors.length === 0) {
+                availableColors = candidateColors;
+            }
 
             if (availableColors.length === 0) {
                 box.dataset.enabled = "false";
