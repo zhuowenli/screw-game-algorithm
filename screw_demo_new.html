@@ -130,6 +130,7 @@
         #color-stats div {
             margin-top: 2px;
         }
+
         #message {
             margin-top: 20px;
             font-size: 1.2em;
@@ -199,8 +200,12 @@
             Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
         );
 
-        const colorPool = { ...COLOR_TOTALS };
-        const boxPool = { ...COLOR_BOX_TOTALS };
+        const colorPool = {
+            ...COLOR_TOTALS
+        };
+        const boxPool = {
+            ...COLOR_BOX_TOTALS
+        };
         const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
         let eliminated = 0;
 
@@ -462,7 +467,7 @@
                     box.style.borderColor = "#ccc";
                     box.addEventListener("click", () => {
                         setupBox(box);
-                        box.querySelector(".hint")?.remove();
+                        box.querySelector(".hint") && box.querySelector(".hint").remove();
                     });
                 }
             });
@@ -517,7 +522,6 @@
         activateCells();
         initBoxes();
         ensureDotCount(); // ✅ 自动控制数量在 9~15
-
     </script>
 </body>
 
