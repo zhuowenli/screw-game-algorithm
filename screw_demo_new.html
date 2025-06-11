@@ -115,8 +115,8 @@
             top: 100px;
             width: 200px;
             text-align: left;
-            background: #fff;
-            border: 1px solid #ccc;
+            background: #ccc;
+            border: 1px solid #aaa;
             padding: 10px;
             box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
             font-size: 14px;
@@ -169,7 +169,6 @@
         <div>队列中螺丝数:<span id="queue-count">0</span></div>
         <div>颜色种类:<span id="color-count">0</span></div>
         <div id="color-stats"></div>
-        <div id="box-stats"></div>
     </div>
 
     <div id="game-board"></div>
@@ -190,8 +189,9 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const TOTAL_SCREWS = 60;
-        let i = 0;
+        const TOTAL_SCREWS = 90;
+
+        // 螺丝生成算法：每3个螺丝随机生成一个颜色，直到生成TOTAL_SCREWS个螺丝
         const COLOR_TOTALS = Array(TOTAL_SCREWS)
             .fill(0)
             .map((_, i) => i)
@@ -202,7 +202,6 @@
                 }
                 return acc;
             }, {});
-        console.log(COLOR_TOTALS);
         const COLOR_BOX_TOTALS = Object.fromEntries(
             Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
         );
@@ -227,7 +226,6 @@
         const queueCountEl = document.getElementById("queue-count");
         const colorCountEl = document.getElementById("color-count");
         const colorStats = document.getElementById("color-stats");
-        const boxStats = document.getElementById("box-stats");
 
         const cellMap = [];
         let activeCells = [];
@@ -511,10 +509,6 @@
                 const screws = colorPool[c] + colorOnField[c];
                 const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
                 return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
-            }).join("");
-            boxStats.innerHTML = COLORS.map(c => {
-                const remaining = boxPool[c];
-                return `<div style="color:${c}">${COLOR_NAMES[c]}剩余盒子:<span>${remaining}</span></div>`;
             }).join("");
         }
 
