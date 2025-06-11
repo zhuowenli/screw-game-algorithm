@@ -72,7 +72,6 @@
             width: 28px;
             height: 28px;
             border-radius: 50%;
-            background: rgba(0, 0, 0, 0.3);
             pointer-events: none;
             display: flex;
             justify-content: center;
@@ -408,7 +407,7 @@
             const screw = screwMap[dot.dataset.sid];
             if (screw) screw.dot = null;
             lockConnections.slice().forEach(conn => {
-                if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                if (conn.controller.id === screw.id || conn.locked.id === screw.id) removeConnection(conn);
             });
             dot.remove();
             colorOnField[color]--;
