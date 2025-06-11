@@ -268,6 +268,8 @@
         const board = document.getElementById("game-board");
         const lineLayer = document.getElementById("line-layer");
         let lockConnections = [];
+        const screwMap = {};
+        let nextScrewId = 0;
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
@@ -365,8 +367,10 @@
                         controller: null,
                         controls: null,
                         overlay: null,
-                        plateId: id
+                        plateId: id,
+                        id: nextScrewId++
                     });
+                    screwMap[screws[screws.length - 1].id] = screws[screws.length - 1];
                     tempPool[color]--;
                     remaining--;
                 }
@@ -384,31 +388,25 @@
             }
         }
 
-        function spawnDot(color, cell) {
+        function spawnDot(screw, cell) {
             const dot = document.createElement("div");
             dot.className = "dot";
-            dot.style.backgroundColor = color;
-            dot.dataset.color = color;
+            dot.style.backgroundColor = screw.color;
+            dot.dataset.color = screw.color;
+            dot.dataset.sid = screw.id;
             dot.dataset.blocked = "false";
             dot.addEventListener("click", () => handleDotClick(dot));
             cell.appendChild(dot);
-            colorPool[color]--;
-            colorOnField[color]++;
+            colorPool[screw.color]--;
+            colorOnField[screw.color]++;
             return dot;
         }
 
         function removeDot(dot) {
             const color = dot.dataset.color;
             const cell = dot.parentElement;
-            const pid = cell && cell.dataset.plateId;
-            let screw = null;
-            if (pid) {
-                const plate = activePlates.find(p => p.id == pid);
-                if (plate) {
-                    screw = plate.screws.find(s => s.dot === dot);
-                    if (screw) screw.dot = null;
-                }
-            }
+            const screw = screwMap[dot.dataset.sid];
+            if (screw) screw.dot = null;
             lockConnections.slice().forEach(conn => {
                 if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
             });
@@ -450,7 +448,7 @@
                 used.add(`${cell.dataset.row}-${cell.dataset.col}`);
                 screw.cell = cell;
                 cell.dataset.plateId = plate.id;
-                const dot = spawnDot(screw.color, cell);
+                const dot = spawnDot(screw, cell);
                 dot.style.zIndex = plate.zIndex + 1;
                 screw.dot = dot;
                 placed++;
@@ -727,13 +725,8 @@
                 const emptySlot = [...box.children].find(el => el.className === "slot" && !el.dataset.filled);
                 if (emptySlot) {
                     const fromCell = dot.parentElement;
-                    const pid = fromCell.dataset.plateId;
-                    const plate = activePlates.find(p => p.id == pid);
-                    let screw = null;
-                    if (plate) {
-                        screw = plate.screws.find(s => s.dot === dot);
-                        if (screw) screw.dot = null;
-                    }
+                    const screw = screwMap[dot.dataset.sid];
+                    if (screw) screw.dot = null;
                     lockConnections.slice().forEach(conn => {
                         if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                     });
@@ -768,13 +761,8 @@
             for (const temp of tempSlots) {
                 if (temp.children.length === 0) {
                     const fromCell = dot.parentElement;
-                    const pid = fromCell.dataset.plateId;
-                    const plate = activePlates.find(p => p.id == pid);
-                    let screw = null;
-                    if (plate) {
-                        screw = plate.screws.find(s => s.dot === dot);
-                        if (screw) screw.dot = null;
-                    }
+                    const screw = screwMap[dot.dataset.sid];
+                    if (screw) screw.dot = null;
                     lockConnections.slice().forEach(conn => {
                         if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                     });
