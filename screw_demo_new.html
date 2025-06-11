@@ -189,11 +189,11 @@
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
         const COLOR_TOTALS = {
-            red: 15,
-            blue: 15,
-            green: 15,
+            red: 30,
+            blue: 30,
+            green: 30,
             yellow: 30,
-            purple: 30
+            purple: 30,
         };
         const TOTAL_SCREWS = Object.values(COLOR_TOTALS).reduce((a, b) => a + b, 0);
         const COLOR_BOX_TOTALS = Object.fromEntries(
@@ -289,7 +289,20 @@
                 }
             });
 
-            const availableColors = COLORS.filter(c => !usedBoxColors.has(c) && colorPool[c] > 0 && boxPool[c] > 0);
+            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            tempSlots.forEach(t => {
+                if (t.children.length > 0) {
+                    const c = t.children[0].dataset.color;
+                    tempCounts[c]++;
+                }
+            });
+
+            const availableColors = COLORS.filter(c =>
+                !usedBoxColors.has(c) &&
+                boxPool[c] > 0 &&
+                (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
+            );
+
             if (availableColors.length === 0) {
                 box.dataset.enabled = "false";
                 box.classList.remove("enabled");
@@ -301,11 +314,6 @@
             const color = availableColors[Math.floor(Math.random() * availableColors.length)];
             boxPool[color]--;
             const availableCells = activeCells.filter(cell => cell.children.length === 0);
-            if (availableCells.length < 3) {
-                showMessage("⚠️ 可用格子不足，无法生成圆点！");
-                return;
-            }
-
             const createCount = Math.min(3, colorPool[color], availableCells.length);
             for (let i = 0; i < createCount; i++) {
                 const index = Math.floor(Math.random() * availableCells.length);
