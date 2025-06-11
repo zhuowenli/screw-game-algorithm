@@ -249,6 +249,7 @@
         let usedBoxColors = new Set();
         let plateQueue = [];
         let activePlates = [];
+        // 控制板块与螺丝的层级，每层之间相差 10，方便调试
         let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
 
         function createGrid() {
@@ -316,7 +317,8 @@
                     col,
                     width,
                     height,
-                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.25)`,
+                    // 板块颜色带透明度，稍微加深以区分层级
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.4)`,
                     cells: plateCells
                 });
                 remaining -= screwCount;
@@ -358,7 +360,7 @@
             board.appendChild(overlay);
             plate.overlay = overlay;
             plate.zIndex = nextPlateZ;
-            nextPlateZ -= 2; // 每次减 2，确保新板块位于更底层
+            nextPlateZ -= 10; // 每层相差 10，方便观察层级
             activePlates.push(plate);
             for (const cell of plate.cells) {
                 const colorsCanUse = COLORS.filter(c => colorPool[c] > 0);
