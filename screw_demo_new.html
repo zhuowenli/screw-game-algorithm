@@ -74,6 +74,12 @@
             border-radius: 50%;
             background: rgba(0,0,0,0.3);
             pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            color: #fff;
+            text-shadow: 0 0 2px #000;
         }
 
         .cell {
@@ -540,6 +546,7 @@
                 locked.dot.classList.add('blocked');
                 const ov = document.createElement('div');
                 ov.className = 'lock-overlay';
+                ov.textContent = '🔒';
                 locked.dot.appendChild(ov);
                 locked.overlay = ov;
             }
