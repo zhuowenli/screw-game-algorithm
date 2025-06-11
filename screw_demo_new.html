@@ -47,6 +47,33 @@
 
         .dot.blocked {
             cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        #line-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1500;
+        }
+
+        .line {
+            stroke: #666;
+            stroke-width: 2;
+        }
+
+        .lock-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.3);
+            pointer-events: none;
         }
 
         .cell {
@@ -185,7 +212,7 @@
         <div id="color-stats"></div>
     </div>
 
-    <div id="game-board"></div>
+    <div id="game-board"><svg id="line-layer"></svg></div>
 
     <div id="message"></div>
 
@@ -233,6 +260,8 @@
         let eliminated = 0;
 
         const board = document.getElementById("game-board");
+        const lineLayer = document.getElementById("line-layer");
+        let lockConnections = [];
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
@@ -325,7 +354,11 @@
                         col: pos.col,
                         color,
                         cell: null,
-                        dot: null
+                        dot: null,
+                        locked: false,
+                        controller: null,
+                        controls: null,
+                        overlay: null
                     });
                     tempPool[color]--;
                     remaining--;
@@ -361,13 +394,17 @@
             const color = dot.dataset.color;
             const cell = dot.parentElement;
             const pid = cell && cell.dataset.plateId;
+            let screw = null;
             if (pid) {
                 const plate = activePlates.find(p => p.id == pid);
                 if (plate) {
-                    const target = plate.screws.find(s => s.dot === dot);
-                    if (target) target.dot = null;
+                    screw = plate.screws.find(s => s.dot === dot);
+                    if (screw) screw.dot = null;
                 }
             }
+            lockConnections.slice().forEach(conn => {
+                if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+            });
             dot.remove();
             colorOnField[color]--;
             eliminated++;
@@ -425,6 +462,9 @@
             plate.overlay && plate.overlay.remove();
             for (const screw of plate.screws) {
                 if (screw.dot) screw.dot.remove();
+                lockConnections.slice().forEach(conn => {
+                    if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                });
                 if (screw.cell) screw.cell.dataset.plateId = '';
             }
             activePlates = activePlates.filter(p => p !== plate);
@@ -451,11 +491,87 @@
                     if (!screw.dot || !screw.cell) continue;
                     const key = `${screw.cell.dataset.row}-${screw.cell.dataset.col}`;
                     const top = topMap[key];
-                    const blocked = !(top && top.id === plate.id);
+                    const blocked = !(top && top.id === plate.id) || screw.locked;
                     screw.dot.dataset.blocked = blocked ? 'true' : 'false';
                     screw.dot.classList.toggle('blocked', blocked);
                 }
             }
+        }
+
+        function getDotCenter(dot) {
+            const br = board.getBoundingClientRect();
+            const dr = dot.getBoundingClientRect();
+            return { x: dr.left - br.left + dr.width / 2, y: dr.top - br.top + dr.height / 2 };
+        }
+
+        function drawLine(fromDot, toDot) {
+            const p1 = getDotCenter(fromDot);
+            const p2 = getDotCenter(toDot);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", p1.x);
+            line.setAttribute("y1", p1.y);
+            line.setAttribute("x2", p2.x);
+            line.setAttribute("y2", p2.y);
+            line.classList.add("line");
+            lineLayer.appendChild(line);
+            return line;
+        }
+
+        function removeConnection(conn) {
+            conn.line && conn.line.remove();
+            if (conn.locked.overlay) { conn.locked.overlay.remove(); conn.locked.overlay = null; }
+            if (conn.locked.dot) {
+                conn.locked.dot.dataset.blocked = 'false';
+                conn.locked.dot.classList.remove('blocked');
+            }
+            conn.locked.locked = false;
+            conn.locked.controller = null;
+            conn.controller.controls = null;
+            lockConnections = lockConnections.filter(c => c !== conn);
+        }
+
+        function applyLock(controller, locked) {
+            controller.controls = locked;
+            locked.controller = controller;
+            locked.locked = true;
+            if (locked.dot) {
+                locked.dot.dataset.blocked = 'true';
+                locked.dot.classList.add('blocked');
+                const ov = document.createElement('div');
+                ov.className = 'lock-overlay';
+                locked.dot.appendChild(ov);
+                locked.overlay = ov;
+            }
+            if (controller.dot && locked.dot) {
+                const line = drawLine(controller.dot, locked.dot);
+                lockConnections.push({ controller, locked, line });
+            }
+        }
+
+        function canControl(controller, target) {
+            if (controller.controls || target.controller) return false;
+            let c = controller;
+            let depth = 1;
+            while (c) {
+                if (c === target) return false;
+                c = c.controller;
+                depth++;
+                if (depth > 4) return false;
+            }
+            return true;
+        }
+
+        function setupLocks() {
+            const all = activePlates.flatMap(p => p.screws);
+            const candidates = all.filter(s => !s.controller && !s.controls);
+            for (const locked of candidates) {
+                if (Math.random() > 0.2) continue;
+                const controllers = all.filter(c => c !== locked && canControl(c, locked));
+                if (controllers.length === 0) continue;
+                const controller = controllers[Math.floor(Math.random() * controllers.length)];
+                applyLock(controller, locked);
+            }
+            updateDotBlockStates();
         }
 
         function spawnNextPlate() {
@@ -725,6 +841,7 @@
             spawnNextPlate();
         }
         initBoxes();
+        setupLocks();
     </script>
 </body>
 
