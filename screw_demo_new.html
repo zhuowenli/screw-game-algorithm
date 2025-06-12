@@ -266,6 +266,7 @@
         const lineLayer = document.getElementById("line-layer");
         const tempSlotsContainer = document.getElementById("temp-slots");
         let tempSlots = null;
+        let tempSlotsState = [];
         let lockConnections = [];
         const screwMap = {};
         let nextScrewId = 0;
@@ -393,6 +394,15 @@
                         row: s.row,
                         col: s.col,
                         color: s.color,
+            tempSlotsState = Array(MAX_TEMP_SLOTS).fill(null);
+            renderTempSlots();
+        }
+
+        function renderTempSlots() {
+                if (tempSlotsState[i]) {
+                    slot.appendChild(tempSlotsState[i]);
+                    tempSlotsState[i].style.position = "absolute";
+                }
                         group: s.group,
                         stage: s.stage,
                         cell: null,
@@ -454,7 +464,12 @@
                     }
                 }
             }
-            updateInfo();
+            const idx = tempSlotsState.findIndex(d => d === dot);
+            if (idx !== -1) {
+                tempSlotsState[idx] = null;
+                renderTempSlots();
+            }
+            if (cell && cell.classList.contains('cell')) checkPlateRemoval(cell);
         }
 
         function spawnDot(screw, cell) {
@@ -720,16 +735,13 @@
             }
         }
 
-        function checkPlateRemoval(cell) {
-            setTimeout(() => {
-                const pid = cell.dataset.plateId;
-                if (!pid) return;
-                const plate = activePlates.find(p => p.id == pid);
-                if (!plate) return;
-                const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                if (!hasDot) {
-                    removePlate(plate);
-                    spawnNextPlate();
+            tempSlotsState.forEach(d => {
+                if (d) {
+                    const c = d.dataset.color;
+            tempSlotsState.forEach(d => {
+                if (d && d.dataset.color === color) {
+                    matchingDots.push(d);
+                        removeDot(dot);
                 }
             }, 10);
         }
@@ -855,28 +867,28 @@
                     checkTempSlotLimit();
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
-                    newDot.style.backgroundColor = color;
-                    newDot.dataset.color = color;
-                    newDot.dataset.filled = "true";
-                    emptySlot.replaceWith(newDot);
-                    dot.remove();
-                    checkPlateRemoval(fromCell);
-                    // 记录本次拔出的格子，供生成算法使用
-                    lastRemovedCell = fromCell;
-                    updateInfo();
-                    checkVictory();
-
-                    const filled = [...box.children].filter(s => s.dataset.color === color).length;
-                    if (filled === 3) {
-                        setTimeout(() => {
-                            usedBoxColors.delete(box.dataset.color);
-                            setupBox(box);
-                            showMessage("🎉 三消成功！");
-                            setTimeout(() => showMessage(""), 1500);
-                            updateInfo();
-                            checkVictory();
-                        }, 300);
-                    }
+            const emptyIndex = tempSlotsState.findIndex(s => s === null);
+            if (emptyIndex !== -1) {
+                const fromCell = dot.parentElement;
+                const screw = screwMap[dot.dataset.sid];
+                if (screw) screw.dot = null;
+                lockConnections.slice().forEach(conn => {
+                    if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                });
+                tempSlotsState[emptyIndex] = dot;
+                renderTempSlots();
+                dot.style.position = "absolute";
+                // 记录本次拔出的格子，供生成算法使用
+                lastRemovedCell = fromCell;
+                checkPlateRemoval(fromCell);
+                updateInfo();
+                checkVictory();
+                checkTempSlotLimit();
+                return;
+            const tempDots = tempSlotsState.filter(d => d).length;
+            if (tempDots >= MAX_TEMP_SLOTS) {
+            const tempDots = tempSlotsState.filter(d => d).length;
+            const tempDots = tempSlotsState.filter(d => d).length;
                     return;
                 }
             }
