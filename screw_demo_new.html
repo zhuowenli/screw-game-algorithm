@@ -301,7 +301,8 @@
         let lockConnections = [];
         const screwMap = {};
         let nextScrewId = 0;
-        const boxes = document.querySelectorAll(".box");
+        let boxes = document.querySelectorAll(".box");
+        const initialBoxStates = Array.from(boxes).map(b => b.dataset.enabled === "true");
         const message = document.getElementById("message");
         const totalCountEl = document.getElementById("total-count");
         const eliminatedCountEl = document.getElementById("eliminated-count");
@@ -968,6 +969,17 @@
             disableGame();
         }
 
+        function resetBoxes() {
+            boxes.forEach((box, i) => {
+                const enabled = initialBoxStates[i];
+                const newBox = document.createElement('div');
+                newBox.className = 'box';
+                newBox.dataset.enabled = enabled ? 'true' : 'false';
+                box.replaceWith(newBox);
+            });
+            boxes = document.querySelectorAll(".box");
+        }
+
         function initBoxes() {
             usedBoxColors.clear();
             boxes.forEach((box, i) => {
@@ -1069,6 +1081,7 @@
             for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
                 spawnNextPlate();
             }
+            resetBoxes();
             initBoxes();
             setupLocks();
             updateInfo();
