@@ -835,10 +835,12 @@
         function setupLocks(newScrews) {
             const free = tempSlotsState.filter(d => d === null).length;
             const baseProb = Math.min(0.8, 0.2 + free * 0.1);
-            const platesToCheck = newScrews ? [ ...new Set(newScrews.map(s => activePlates.find(p => p.id === s.plateId))) ] : activePlates;
+            const platesToCheck = newScrews ? [...new Set(newScrews.map(s => activePlates.find(p => p.id === s
+                .plateId)))] : activePlates;
             for (const plate of platesToCheck) {
                 const all = plate.screws;
-                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && !s.controller && !s.controls);
+                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && !s.controller && !s
+                    .controls);
                 for (const locked of candidates) {
                     const requiredDepth = maxColorLockDepth(locked.color);
                     if (requiredDepth === 0 && Math.random() > baseProb) continue;
@@ -850,8 +852,8 @@
                         return da - db;
                     });
                     let controller = controllers.find(c => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
-                    if (!controller) controller = controllers[0];
-                    applyLock(controller, locked);
+                    // if (!controller) controller = controllers[0];
+                    controller && applyLock(controller, locked);
                 }
             }
         }
