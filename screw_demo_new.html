@@ -230,6 +230,7 @@
         </div>
         <button id="start-btn">开始游戏</button>
         <button id="reset-btn">重置游戏</button>
+        <button id="auto-btn">自动玩</button>
     </div>
 
     <div id="boxes">
@@ -793,19 +794,13 @@
         function checkPlateRemoval(cell) {
             setTimeout(() => {
                 const pid = cell.dataset.plateId;
-                console.log('pid:', pid);
                 if (!pid) return;
                 const plate = activePlates.find(p => p.id == pid);
-                console.log('plate:', plate);
                 if (!plate) return;
                 const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                console.log('hasDot:', hasDot);
                 if (!hasDot) {
                     removePlate(plate);
                     spawnNextPlate();
-                } else {
-                    console.log('hasDot:',
-                        plate.screws.find(s => s.cell && s.cell.querySelector('.dot') && s.dot));
                 }
             }, 100);
         }
@@ -1068,6 +1063,7 @@
         function disableGame() {
             document.querySelectorAll('.dot').forEach(d => d.style.pointerEvents = 'none');
             boxes.forEach(b => b.style.pointerEvents = 'none');
+            stopAutoPlay();
         }
 
         function checkVictory() {
@@ -1081,7 +1077,74 @@
             }
         }
 
+        let autoPlayTimer = null;
+
+        function getChain(screw) {
+            const chain = [];
+            let cur = screw.controller;
+            while (cur) {
+                chain.unshift(cur);
+                cur = cur.controller;
+            }
+            return chain;
+        }
+
+        function tryClickDot(dot) {
+            const screw = screwMap[dot.dataset.sid];
+            const chain = getChain(screw);
+            const free = tempSlotsState.filter(d => d === null).length;
+            if (free < chain.length) return false;
+            for (const s of chain) {
+                if (!s.dot || s.dot.dataset.blocked === 'true') return false;
+            }
+            for (const s of chain) {
+                handleDotClick(s.dot);
+            }
+            handleDotClick(dot);
+            return true;
+        }
+
+        function autoPlayStep() {
+            if (message.textContent.includes('胜利') || message.textContent.includes('失败')) {
+                stopAutoPlay();
+                return;
+            }
+
+            for (const box of boxes) {
+                if (box.dataset.enabled !== 'true') continue;
+                const color = box.dataset.color;
+                const dots = [...document.querySelectorAll('#game-board .dot')].filter(d => d.dataset.color === color);
+                for (const dot of dots) {
+                    if (tryClickDot(dot)) return;
+                }
+            }
+
+            for (const plate of activePlates) {
+                const dots = plate.screws.map(s => s.dot).filter(Boolean);
+                const free = tempSlotsState.filter(d => d === null).length;
+                if (free < dots.length) continue;
+                for (const dot of dots) {
+                    if (tryClickDot(dot)) return;
+                }
+            }
+        }
+
+        function startAutoPlay() {
+            if (autoPlayTimer) return;
+            autoPlayTimer = setInterval(autoPlayStep, 1000);
+            autoBtn.textContent = '停止自动';
+        }
+
+        function stopAutoPlay() {
+            if (autoPlayTimer) {
+                clearInterval(autoPlayTimer);
+                autoPlayTimer = null;
+            }
+            autoBtn.textContent = '自动玩';
+        }
+
         function startGame() {
+            stopAutoPlay();
             TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
             const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
             MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
@@ -1117,8 +1180,23 @@
             showMessage('');
         }
 
-        document.getElementById('start-btn').addEventListener('click', startGame);
-        document.getElementById('reset-btn').addEventListener('click', startGame);
+        const autoBtn = document.getElementById('auto-btn');
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            stopAutoPlay();
+            startGame();
+        });
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            stopAutoPlay();
+            startGame();
+        });
+        autoBtn.addEventListener('click', () => {
+            if (autoPlayTimer) {
+                stopAutoPlay();
+            } else {
+                startAutoPlay();
+            }
+        });
         addTempSlotBtn.addEventListener('click', () => {
             MAX_TEMP_SLOTS++;
             tempSlotsState.push(null);
