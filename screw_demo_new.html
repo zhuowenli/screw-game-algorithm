@@ -281,7 +281,7 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const AUTO_PLAY_INTERVAL = 300;
+        const AUTO_PLAY_INTERVAL = 250; // 自动点击间隔
         let TOTAL_BOXES = 50;
         let TOTAL_SCREWS = TOTAL_BOXES * 3;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
@@ -614,7 +614,7 @@
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
                 if (screw.cell) {
-                    checkPlateRemoval(screw.cell);
+                    // checkPlateRemoval(screw.cell);
                     screw.cell.dataset.plateId = '';
                 }
             }
@@ -802,18 +802,13 @@
         }
 
         function checkPlateRemoval(cell) {
-            setTimeout(() => {
-                cleanupOrphanLocks();
-                const pid = cell.dataset.plateId;
-                if (!pid) return;
-                const plate = activePlates.find(p => p.id == pid);
-                if (!plate) return;
+            activePlates.forEach(plate => {
                 const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
                 if (!hasDot) {
                     removePlate(plate);
                     spawnNextPlate();
                 }
-            }, 100);
+            });
         }
 
         function setupBox(box) {
@@ -980,7 +975,7 @@
                             setTimeout(() => showMessage(""), 1500);
                             updateInfo();
                             checkVictory();
-                        }, 300);
+                        }, 10);
                     }
                     return;
                 }
