@@ -168,6 +168,19 @@
             font-size: 14px;
         }
 
+        #settings-panel {
+            position: fixed;
+            left: 20px;
+            top: 100px;
+            width: 200px;
+            text-align: left;
+            background: #ccc;
+            border: 1px solid #aaa;
+            padding: 10px;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+            font-size: 14px;
+        }
+
         #info-panel span {
             font-weight: bold;
             margin-left: 5px;
@@ -187,6 +200,20 @@
 
 <body>
     <h1>三消游戏（自动补点 + 配套圆点）</h1>
+
+    <div id="settings-panel">
+        <div>
+            <label>螺丝盒总数:<input id="box-count" type="number" value="50" min="1"></label>
+        </div>
+        <div>
+            <label>螺丝颜色数:<input id="color-count-input" type="number" value="7" min="1" max="10"></label>
+        </div>
+        <div>
+            <label>临时孔位数量:<input id="temp-count" type="number" value="5" min="1"></label>
+        </div>
+        <button id="start-btn">开始游戏</button>
+        <button id="reset-btn">重置游戏</button>
+    </div>
 
     <div id="boxes">
         <div class="box" data-enabled="true"></div>
@@ -216,7 +243,7 @@
     <div id="message"></div>
 
     <script>
-        const COLORS = ["red", "blue", "green", "yellow", "purple", "orange"];
+        const ALL_COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "brown", "cyan", "gray"];
         const COLOR_NAMES = {
             red: "红色",
             blue: "蓝色",
@@ -224,44 +251,50 @@
             yellow: "黄色",
             purple: "紫色",
             orange: "橙色",
-            // pink: "粉色"
+            pink: "粉色",
+            brown: "棕色",
+            cyan: "青色",
+            gray: "灰色"
         };
+        let COLORS = ALL_COLORS.slice(0, 7);
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const TOTAL_SCREWS = 90;
+        let TOTAL_BOXES = 50;
+        let TOTAL_SCREWS = TOTAL_BOXES * 3;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
         let MAX_TEMP_SLOTS = 5;
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
 
-        // 螺丝生成算法：每3个螺丝随机生成一个颜色，直到生成TOTAL_SCREWS个螺丝
-        const COLOR_TOTALS = Array(TOTAL_SCREWS)
-            .fill(0)
-            .map((_, i) => i)
-            .reduce((acc, i) => {
-                if (i % 3 === 0) {
-                    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                    acc[color] = acc[color] ? acc[color] + 3 : 3;
-                }
-                return acc;
-            }, {});
-        const COLOR_BOX_TOTALS = Object.fromEntries(
-            Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
-        );
+        let COLOR_TOTALS = {};
+        let COLOR_BOX_TOTALS = {};
+        let colorPool = {};
+        let boxPool = {};
 
-        const colorPool = {
-            ...COLOR_TOTALS
-        };
-        const boxPool = {
-            ...COLOR_BOX_TOTALS
-        };
+        function initPools() {
+            COLOR_TOTALS = Array(TOTAL_SCREWS)
+                .fill(0)
+                .map((_, i) => i)
+                .reduce((acc, i) => {
+                    if (i % 3 === 0) {
+                        const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                        acc[color] = acc[color] ? acc[color] + 3 : 3;
+                    }
+                    return acc;
+                }, {});
+            COLOR_BOX_TOTALS = Object.fromEntries(
+                Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
+            );
+            colorPool = { ...COLOR_TOTALS };
+            boxPool = { ...COLOR_BOX_TOTALS };
+        }
 
         let boardData = [];
         let boardState = [];
 
         const board = document.getElementById("game-board");
-        const lineLayer = document.getElementById("line-layer");
+        let lineLayer = document.getElementById("line-layer");
         const tempSlotsContainer = document.getElementById("temp-slots");
         let tempSlots = null;
         let tempSlotsState = [];
@@ -1007,16 +1040,44 @@
             }
         }
 
-        createGrid();
-        activateCells();
-        initTempSlots();
-        generateBoardData();
-        initBoardState();
-        for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
-            spawnNextPlate();
+        function startGame() {
+            TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
+            const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
+            MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
+            COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
+            TOTAL_SCREWS = TOTAL_BOXES * 3;
+
+            board.innerHTML = '<svg id="line-layer"></svg>';
+            lineLayer = document.getElementById('line-layer');
+            cellMap.length = 0;
+            activeCells = [];
+            plates = [];
+            activePlates = [];
+            lockConnections = [];
+            usedBoxColors.clear();
+            tempSlotsState = [];
+            nextPlateIndex = 0;
+            nextScrewId = 0;
+            for (const k in screwMap) delete screwMap[k];
+
+            createGrid();
+            activateCells();
+            initTempSlots();
+            initPools();
+            generateBoardData();
+            initBoardState();
+            for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
+                spawnNextPlate();
+            }
+            initBoxes();
+            setupLocks();
+            updateInfo();
+            showMessage('');
         }
-        initBoxes();
-        setupLocks();
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('reset-btn').addEventListener('click', startGame);
+        startGame();
     </script>
 </body>
 
