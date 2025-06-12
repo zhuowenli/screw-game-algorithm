@@ -132,11 +132,28 @@
             pointer-events: none;
         }
 
-        #temp-slots {
+        #temp-slot-area {
             display: flex;
             justify-content: center;
+            align-items: center;
             gap: 10px;
             margin: 20px auto;
+        }
+
+        #temp-slots {
+            display: flex;
+            gap: 10px;
+        }
+
+        #add-temp-slot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 2px dashed #aaa;
+            background: #fff;
+            font-size: 20px;
+            line-height: 20px;
+            cursor: pointer;
         }
 
         .temp-slot {
@@ -226,7 +243,10 @@
         </div>
     </div>
 
-    <div id="temp-slots"></div>
+    <div id="temp-slot-area">
+        <div id="temp-slots"></div>
+        <button id="add-temp-slot">+</button>
+    </div>
 
     <div id="info-panel">
         <div>关卡总螺丝数:<span id="total-count"></span></div>
@@ -311,6 +331,7 @@
         const queueCountEl = document.getElementById("queue-count");
         const colorCountEl = document.getElementById("color-count");
         const colorStats = document.getElementById("color-stats");
+        const addTempSlotBtn = document.getElementById("add-temp-slot");
 
         const cellMap = [];
         let activeCells = [];
@@ -1090,6 +1111,12 @@
 
         document.getElementById('start-btn').addEventListener('click', startGame);
         document.getElementById('reset-btn').addEventListener('click', startGame);
+        addTempSlotBtn.addEventListener('click', () => {
+            MAX_TEMP_SLOTS++;
+            tempSlotsState.push(null);
+            renderTempSlots();
+            updateInfo();
+        });
         startGame();
     </script>
 </body>
