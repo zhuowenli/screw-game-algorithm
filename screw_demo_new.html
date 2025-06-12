@@ -531,7 +531,6 @@
             for (const id in screwMap) {
                 const s = screwMap[id];
                 if (s.locked && !connectedLocked.has(s.id) && !connectedControllers.has(s.id)) {
-                    console.log(s.id, s);
                     s.locked = false;
                     s.controller = null;
                     if (s.overlay) {
@@ -654,19 +653,13 @@
         function checkPlateRemoval(cell) {
             setTimeout(() => {
                 const pid = cell.dataset.plateId;
-                console.log('checkPlateRemoval:', pid);
                 if (!pid) return;
                 const plate = activePlates.find(p => p.id == pid);
-                console.log('plate:', plate);
                 if (!plate) return;
                 const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                console.log('hasDot:', hasDot);
                 if (!hasDot) {
                     removePlate(plate);
                     spawnNextPlate();
-                } else {
-                    console.log('hasDot:', plate.screws.find(s => s.cell && s.cell.querySelector('.dot') && s
-                        .dot));
                 }
             }, 10);
         }
