@@ -652,16 +652,38 @@
         }
 
         function cleanupOrphanLocks() {
-            const connectedControllers = new Set();
-            const connectedLocked = new Set();
-
+            // Remove connections that reference missing screws or dots
             lockConnections = lockConnections.filter(conn => {
                 const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
-                if (valid) {
-                    connectedControllers.add(conn.controller.id);
-                    connectedLocked.add(conn.locked.id);
-                    return true;
+                if (!valid) {
+                    conn.line && conn.line.remove();
+                    if (conn.locked.overlay) {
+                        conn.locked.overlay.remove();
+                        conn.locked.overlay = null;
+                    }
+                    if (conn.locked.dot) {
+                        conn.locked.dot.dataset.blocked = 'false';
+                        conn.locked.dot.classList.remove('blocked');
+                    }
+                    conn.locked.locked = false;
+                    conn.locked.controller = null;
+                    conn.controller.controls = null;
+                    if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+                    if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
                 }
+                return valid;
+            });
+
+            // Break pairs of screws locked to each other
+            const mutual = new Set();
+            for (const conn of lockConnections) {
+                const partner = lockConnections.find(c => c.controller === conn.locked && c.locked === conn.controller);
+                if (partner) {
+                    mutual.add(conn);
+                    mutual.add(partner);
+                }
+            }
+            for (const conn of mutual) {
                 conn.line && conn.line.remove();
                 if (conn.locked.overlay) {
                     conn.locked.overlay.remove();
@@ -674,7 +696,18 @@
                 conn.locked.locked = false;
                 conn.locked.controller = null;
                 conn.controller.controls = null;
-                return false;
+                if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+                if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
+            }
+            if (mutual.size > 0) {
+                lockConnections = lockConnections.filter(c => !mutual.has(c));
+            }
+
+            const connectedControllers = new Set();
+            const connectedLocked = new Set();
+            lockConnections.forEach(conn => {
+                connectedControllers.add(conn.controller.id);
+                connectedLocked.add(conn.locked.id);
             });
 
             for (const id in screwMap) {
