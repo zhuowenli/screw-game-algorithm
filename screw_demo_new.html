@@ -199,13 +199,7 @@
         </div>
     </div>
 
-    <div id="temp-slots">
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-    </div>
+    <div id="temp-slots"></div>
 
     <div id="info-panel">
         <div>关卡总螺丝数:<span id="total-count"></span></div>
@@ -237,6 +231,7 @@
         const MAX_ACTIVATED_CELLS = 200;
         const TOTAL_SCREWS = 90;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
+        let MAX_TEMP_SLOTS = 5;
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
 
@@ -264,13 +259,17 @@
         const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
         let eliminated = 0;
 
+        let boardData = [];
+        let boardState = [];
+
         const board = document.getElementById("game-board");
         const lineLayer = document.getElementById("line-layer");
+        const tempSlotsContainer = document.getElementById("temp-slots");
+        let tempSlots = null;
         let lockConnections = [];
         const screwMap = {};
         let nextScrewId = 0;
         const boxes = document.querySelectorAll(".box");
-        const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
         const totalCountEl = document.getElementById("total-count");
         const eliminatedCountEl = document.getElementById("eliminated-count");
@@ -326,7 +325,8 @@
         }
 
         // 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
-        function generatePlates() {
+        function generateBoardData() {
+            boardData = [];
             let remaining = TOTAL_SCREWS;
             let id = 0;
             const tempPool = {
@@ -360,31 +360,100 @@
                         row: pos.row,
                         col: pos.col,
                         color,
+                        group: id,
+                        stage: 0,
+                        id: nextScrewId++
+                    });
+                    tempPool[color]--;
+                    remaining--;
+                }
+            boardData.push({
+                id: id++,
+                row,
+                col,
+                width,
+                height,
+                screws
+            });
+        }
+
+        function initBoardState() {
+            nextPlateZ = 1000;
+            plates = boardData.map(p => {
+                const plate = {
+                    id: p.id,
+                    row: p.row,
+                    col: p.col,
+                    width: p.width,
+                    height: p.height,
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
+                    screws: p.screws.map(s => ({
+                        id: s.id,
+                        row: s.row,
+                        col: s.col,
+                        color: s.color,
+                        group: s.group,
+                        stage: s.stage,
                         cell: null,
                         dot: null,
                         locked: false,
                         controller: null,
                         controls: null,
                         overlay: null,
-                        plateId: id,
-                        id: nextScrewId++
-                    });
-                    screwMap[screws[screws.length - 1].id] = screws[screws.length - 1];
-                    tempPool[color]--;
-                    remaining--;
-                }
-                plates.push({
-                    id: id++,
-                    row,
-                    col,
-                    width,
-                    height,
-                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
-                    screws,
+                        plateId: p.id
+                    })),
                     zIndex: nextPlateZ
-                });
+                };
                 nextPlateZ -= 10;
+                return plate;
+            });
+            boardState = plates;
+            for (const k in screwMap) delete screwMap[k];
+            for (const p of plates) {
+                for (const s of p.screws) {
+                    screwMap[s.id] = s;
+                }
             }
+            nextPlateIndex = 0;
+        }
+
+        function initTempSlots() {
+            tempSlotsContainer.innerHTML = "";
+            for (let i = 0; i < MAX_TEMP_SLOTS; i++) {
+                const slot = document.createElement("div");
+                slot.className = "temp-slot";
+                tempSlotsContainer.appendChild(slot);
+            }
+            tempSlots = document.querySelectorAll(".temp-slot");
+        }
+
+        function getBoardInfo() {
+            return {
+                layers: JSON.parse(JSON.stringify(boardData)),
+                state: JSON.parse(JSON.stringify(boardState))
+            };
+        }
+
+        function setDifficulty(opts) {
+            if (opts.tempSlots !== undefined) {
+                MAX_TEMP_SLOTS = opts.tempSlots;
+                initTempSlots();
+            }
+            if (opts.colorPool) {
+                for (const c in opts.colorPool) {
+                    if (colorPool[c] !== undefined) {
+                        colorPool[c] = opts.colorPool[c];
+                    }
+                }
+            }
+            if (opts.boxPool) {
+                for (const c in opts.boxPool) {
+                    if (boxPool[c] !== undefined) {
+                        boxPool[c] = opts.boxPool[c];
+                    }
+                }
+            }
+            updateInfo();
         }
 
         function spawnDot(screw, cell) {
@@ -907,7 +976,9 @@
 
         createGrid();
         activateCells();
-        generatePlates();
+        initTempSlots();
+        generateBoardData();
+        initBoardState();
         for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
             spawnNextPlate();
         }
