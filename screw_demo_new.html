@@ -257,7 +257,6 @@
             ...COLOR_BOX_TOTALS
         };
         const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
-        let eliminated = 0;
 
         let boardData = [];
         let boardState = [];
@@ -497,7 +496,6 @@
             }
             dot.remove();
             colorOnField[color]--;
-            // eliminated++;
             if (cell) checkPlateRemoval(cell);
         }
 
@@ -728,8 +726,7 @@
                     applyLock(controller, locked);
                 }
             }
-            updateDotBlockStates();
-        }
+            // clear previous filled dots
 
         function spawnNextPlate() {
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
@@ -927,8 +924,9 @@
         }
 
         function initBoxes() {
-            usedBoxColors.clear();
-            boxes.forEach((box, i) => {
+            const onBoard = activePlates.reduce((sum, p) => sum + p.screws.filter(s => s.dot).length, 0);
+            const eliminated = TOTAL_SCREWS - remaining;
+            eliminatedCountEl.textContent = eliminated;
                 box.innerHTML = "";
                 if (box.dataset.enabled === "true") {
                     setupBox(box);
