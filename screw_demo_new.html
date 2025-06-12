@@ -831,7 +831,8 @@
             if (activePlates.length >= MAX_VISIBLE_PLATES) return;
 
             let attempts = 0;
-            while (failedPlates.length > 0 && activePlates.length < MAX_VISIBLE_PLATES && attempts < failedPlates.length) {
+            while (failedPlates.length > 0 && activePlates.length < MAX_VISIBLE_PLATES && attempts < failedPlates
+                .length) {
                 const plate = failedPlates.shift();
                 if (spawnPlate(plate)) {
                     setupLocks();
@@ -854,10 +855,24 @@
 
         function checkPlateRemoval(cell) {
             activePlates.forEach(plate => {
-                const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                if (!hasDot) {
+                const dots = plate.screws.filter(s => s.cell && s.cell.querySelector('.dot') && s.dot);
+                if (dots.length === 0) {
                     removePlate(plate);
                     spawnNextPlate();
+                }
+                const locked = plate.screws.filter(s => s.locked);
+                if (dots.length === locked.length) {
+                    const s = locked[0];
+                    s.locked = false;
+                    s.controller = null;
+                    if (s.overlay) {
+                        s.overlay.remove();
+                        s.overlay = null;
+                    }
+                    if (s.dot) {
+                        s.dot.dataset.blocked = 'false';
+                        s.dot.classList.remove('blocked');
+                    }
                 }
             });
         }
