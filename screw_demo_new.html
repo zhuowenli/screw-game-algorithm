@@ -811,20 +811,10 @@
         }
 
         function setupBox(box) {
-            // count colors currently on the board
-            const boardCounts = countBoardColors();
-
-            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
-            tempSlotsState.forEach(d => {
-                if (d) {
-                    const c = d.dataset.color;
-                    tempCounts[c]++;
-                }
-            });
+            const sceneCounts = countSceneColors();
 
             const candidateColors = COLORS.filter(c =>
-                boxPool[c] > 0 &&
-                (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0)
+                boxPool[c] > 0 && (colorPool[c] > 0 || sceneCounts[c] > 0)
             );
             let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
             if (availableColors.length === 0) {
@@ -839,7 +829,10 @@
                 return;
             }
 
-            const color = availableColors[Math.floor(Math.random() * availableColors.length)];
+            const weights = Object.fromEntries(
+                availableColors.map(c => [c, Math.pow(sceneCounts[c] + 1, 2)])
+            );
+            const color = weightedRandom(availableColors, weights);
             boxPool[color]--;
 
             box.dataset.color = color;
@@ -869,16 +862,6 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
-                    function countBoardColors() {
-                        const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
-                        for (const plate of activePlates) {
-                            for (const screw of plate.screws) {
-                                if (screw.dot) counts[screw.color]++;
-                            }
-                        }
-                        return counts;
-                    }
-
                     removeDot(matchingDots[i]);
                 }
                 setTimeout(() => {
@@ -921,6 +904,31 @@
                 }
             }
             return counts;
+        }
+
+        function countSceneColors() {
+            const counts = countBoardColors();
+            tempSlotsState.forEach(d => {
+                if (d) counts[d.dataset.color]++;
+            });
+            boxes.forEach(box => {
+                [...box.children].forEach(slot => {
+                    if (slot.dataset.filled && slot.dataset.color) {
+                        counts[slot.dataset.color]++;
+                    }
+                });
+            });
+            return counts;
+        }
+
+        function weightedRandom(colors, weights) {
+            const total = colors.reduce((s, c) => s + weights[c], 0);
+            let r = Math.random() * total;
+            for (const c of colors) {
+                r -= weights[c];
+                if (r <= 0) return c;
+            }
+            return colors[colors.length - 1];
         }
 
         function handleDotClick(dot) {
