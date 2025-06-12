@@ -367,14 +367,15 @@
                     tempPool[color]--;
                     remaining--;
                 }
-            boardData.push({
-                id: id++,
-                row,
-                col,
-                width,
-                height,
-                screws
-            });
+                boardData.push({
+                    id: id++,
+                    row,
+                    col,
+                    width,
+                    height,
+                    screws
+                });
+            }
         }
 
         function initBoardState() {
