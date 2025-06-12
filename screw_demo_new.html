@@ -477,6 +477,7 @@
                 }
             }
             nextPlateIndex = 0;
+            failedPlates = [];
         }
 
         function initTempSlots() {
@@ -824,13 +825,30 @@
             }
         }
 
+        let failedPlates = [];
+
         function spawnNextPlate() {
+            if (activePlates.length >= MAX_VISIBLE_PLATES) return;
+
+            let attempts = 0;
+            while (failedPlates.length > 0 && activePlates.length < MAX_VISIBLE_PLATES && attempts < failedPlates.length) {
+                const plate = failedPlates.shift();
+                if (spawnPlate(plate)) {
+                    setupLocks();
+                } else {
+                    failedPlates.push(plate);
+                }
+                attempts++;
+            }
+
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
                 const next = plates[nextPlateIndex++];
                 if (spawnPlate(next)) {
                     setupLocks();
-                    break;
+                } else {
+                    failedPlates.push(next);
                 }
+                if (activePlates.length >= MAX_VISIBLE_PLATES) break;
             }
         }
 
