@@ -47,6 +47,38 @@
 
         .dot.blocked {
             cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        #line-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1500;
+        }
+
+        .line {
+            stroke: #666;
+            stroke-width: 2;
+        }
+
+        .lock-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            color: #fff;
+            text-shadow: 0 0 2px #000;
         }
 
         .cell {
@@ -185,12 +217,12 @@
         <div id="color-stats"></div>
     </div>
 
-    <div id="game-board"></div>
+    <div id="game-board"><svg id="line-layer"></svg></div>
 
     <div id="message"></div>
 
     <script>
-        const COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink"];
+        const COLORS = ["red", "blue", "green", "yellow", "purple", "orange"];
         const COLOR_NAMES = {
             red: "红色",
             blue: "蓝色",
@@ -198,7 +230,7 @@
             yellow: "黄色",
             purple: "紫色",
             orange: "橙色",
-            pink: "粉色"
+            // pink: "粉色"
         };
         const ROWS = 30;
         const COLS = 20;
@@ -233,6 +265,10 @@
         let eliminated = 0;
 
         const board = document.getElementById("game-board");
+        const lineLayer = document.getElementById("line-layer");
+        let lockConnections = [];
+        const screwMap = {};
+        let nextScrewId = 0;
         const boxes = document.querySelectorAll(".box");
         const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
@@ -325,8 +361,15 @@
                         col: pos.col,
                         color,
                         cell: null,
-                        dot: null
+                        dot: null,
+                        locked: false,
+                        controller: null,
+                        controls: null,
+                        overlay: null,
+                        plateId: id,
+                        id: nextScrewId++
                     });
+                    screwMap[screws[screws.length - 1].id] = screws[screws.length - 1];
                     tempPool[color]--;
                     remaining--;
                 }
@@ -336,7 +379,7 @@
                     col,
                     width,
                     height,
-                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.4)`,
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
                     screws,
                     zIndex: nextPlateZ
                 });
@@ -344,30 +387,29 @@
             }
         }
 
-        function spawnDot(color, cell) {
+        function spawnDot(screw, cell) {
             const dot = document.createElement("div");
             dot.className = "dot";
-            dot.style.backgroundColor = color;
-            dot.dataset.color = color;
+            dot.style.backgroundColor = screw.color;
+            dot.dataset.color = screw.color;
+            dot.dataset.sid = screw.id;
             dot.dataset.blocked = "false";
             dot.addEventListener("click", () => handleDotClick(dot));
             cell.appendChild(dot);
-            colorPool[color]--;
-            colorOnField[color]++;
+            colorPool[screw.color]--;
+            colorOnField[screw.color]++;
             return dot;
         }
 
         function removeDot(dot) {
             const color = dot.dataset.color;
             const cell = dot.parentElement;
-            const pid = cell && cell.dataset.plateId;
-            if (pid) {
-                const plate = activePlates.find(p => p.id == pid);
-                if (plate) {
-                    const target = plate.screws.find(s => s.dot === dot);
-                    if (target) target.dot = null;
-                }
-            }
+            const screw = screwMap[dot.dataset.sid];
+            if (screw) screw.dot = null;
+            lockConnections.slice().forEach(conn => {
+                cleanupOrphanLocks();
+                if (conn.controller.id === screw.id || conn.locked.id === screw.id) removeConnection(conn);
+            });
             dot.remove();
             colorOnField[color]--;
             eliminated++;
@@ -406,7 +448,7 @@
                 used.add(`${cell.dataset.row}-${cell.dataset.col}`);
                 screw.cell = cell;
                 cell.dataset.plateId = plate.id;
-                const dot = spawnDot(screw.color, cell);
+                const dot = spawnDot(screw, cell);
                 dot.style.zIndex = plate.zIndex + 1;
                 screw.dot = dot;
                 placed++;
@@ -425,10 +467,12 @@
             plate.overlay && plate.overlay.remove();
             for (const screw of plate.screws) {
                 if (screw.dot) screw.dot.remove();
+                lockConnections.slice().forEach(conn => {
+                    if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                });
                 if (screw.cell) screw.cell.dataset.plateId = '';
             }
             activePlates = activePlates.filter(p => p !== plate);
-            updateDotBlockStates();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
@@ -451,17 +495,160 @@
                     if (!screw.dot || !screw.cell) continue;
                     const key = `${screw.cell.dataset.row}-${screw.cell.dataset.col}`;
                     const top = topMap[key];
-                    const blocked = !(top && top.id === plate.id);
+                    const blocked = !(top && top.id === plate.id) || screw.locked;
                     screw.dot.dataset.blocked = blocked ? 'true' : 'false';
                     screw.dot.classList.toggle('blocked', blocked);
                 }
             }
         }
 
+        function cleanupOrphanLocks() {
+            const connectedControllers = new Set();
+            const connectedLocked = new Set();
+
+            lockConnections = lockConnections.filter(conn => {
+                const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
+                if (valid) {
+                    connectedControllers.add(conn.controller.id);
+                    connectedLocked.add(conn.locked.id);
+                    return true;
+                }
+                conn.line && conn.line.remove();
+                if (conn.locked.overlay) {
+                    conn.locked.overlay.remove();
+                    conn.locked.overlay = null;
+                }
+                if (conn.locked.dot) {
+                    conn.locked.dot.dataset.blocked = 'false';
+                    conn.locked.dot.classList.remove('blocked');
+                }
+                conn.locked.locked = false;
+                conn.locked.controller = null;
+                conn.controller.controls = null;
+                return false;
+            });
+
+            console.log(connectedLocked);
+            console.log(connectedControllers);
+
+            for (const id in screwMap) {
+                const s = screwMap[id];
+                if (s.locked && !connectedLocked.has(s.id) && !connectedControllers.has(s.id)) {
+                    console.log(s.id, s);
+                    s.locked = false;
+                    s.controller = null;
+                    if (s.overlay) {
+                        s.overlay.remove();
+                        s.overlay = null;
+                    }
+                    if (s.dot) {
+                        s.dot.dataset.blocked = 'false';
+                        s.dot.classList.remove('blocked');
+                    }
+                }
+                if (s.controls && !connectedControllers.has(s.id)) {
+                    s.controls = null;
+                }
+            }
+            updateDotBlockStates();
+        }
+
+        function getDotCenter(dot) {
+            const br = board.getBoundingClientRect();
+            const dr = dot.getBoundingClientRect();
+            return {
+                x: dr.left - br.left + dr.width / 2,
+                y: dr.top - br.top + dr.height / 2
+            };
+        }
+
+        function drawLine(fromDot, toDot) {
+            const p1 = getDotCenter(fromDot);
+            const p2 = getDotCenter(toDot);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", p1.x);
+            line.setAttribute("y1", p1.y);
+            line.setAttribute("x2", p2.x);
+            line.setAttribute("y2", p2.y);
+            line.classList.add("line");
+            lineLayer.appendChild(line);
+            return line;
+        }
+
+        function removeConnection(conn) {
+            conn.line && conn.line.remove();
+            if (conn.locked.overlay) {
+                conn.locked.overlay.remove();
+                conn.locked.overlay = null;
+            }
+            if (conn.locked.dot) {
+                conn.locked.dot.dataset.blocked = 'false';
+                conn.locked.dot.classList.remove('blocked');
+            }
+            conn.locked.locked = false;
+            conn.locked.controller = null;
+            conn.controller.controls = null;
+            lockConnections = lockConnections.filter(c => c !== conn);
+        }
+
+        function applyLock(controller, locked) {
+            controller.controls = locked;
+            locked.controller = controller;
+            locked.locked = true;
+            if (locked.dot) {
+                locked.dot.dataset.blocked = 'true';
+                locked.dot.classList.add('blocked');
+                const ov = document.createElement('div');
+                ov.className = 'lock-overlay';
+                ov.textContent = '🔒';
+                locked.dot.appendChild(ov);
+                locked.overlay = ov;
+            }
+            if (controller.dot && locked.dot) {
+                const line = drawLine(controller.dot, locked.dot);
+                lockConnections.push({
+                    controller,
+                    locked,
+                    line
+                });
+            }
+            cleanupOrphanLocks();
+        }
+
+        function canControl(controller, target) {
+            if (controller.plateId !== target.plateId) return false;
+            if (controller.controls || target.controller) return false;
+            let c = controller;
+            let depth = 1;
+            while (c) {
+                if (c === target) return false;
+                c = c.controller;
+                depth++;
+                if (depth > 4) return false;
+            }
+            return true;
+        }
+
+        function setupLocks() {
+            for (const plate of activePlates) {
+                const all = plate.screws;
+                const candidates = all.filter(s => !s.controller && !s.controls);
+                for (const locked of candidates) {
+                    if (Math.random() > 0.2) continue;
+                    const controllers = all.filter(c => c !== locked && canControl(c, locked));
+                    if (controllers.length === 0) continue;
+                    const controller = controllers[Math.floor(Math.random() * controllers.length)];
+                    applyLock(controller, locked);
+                }
+            }
+            updateDotBlockStates();
+        }
+
         function spawnNextPlate() {
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
                 const next = plates[nextPlateIndex++];
                 if (spawnPlate(next)) {
+                    setupLocks();
                     break;
                 }
             }
@@ -570,6 +757,7 @@
                     if (emptySlot) {
                         const newDot = document.createElement("div");
                         newDot.className = "slot";
+                        cleanupOrphanLocks();
                         newDot.style.backgroundColor = color;
                         newDot.dataset.color = color;
                         newDot.dataset.filled = "true";
@@ -599,12 +787,12 @@
                 const emptySlot = [...box.children].find(el => el.className === "slot" && !el.dataset.filled);
                 if (emptySlot) {
                     const fromCell = dot.parentElement;
-                    const pid = fromCell.dataset.plateId;
-                    const plate = activePlates.find(p => p.id == pid);
-                    if (plate) {
-                        const target = plate.screws.find(s => s.dot === dot);
-                        if (target) target.dot = null;
-                    }
+                    const screw = screwMap[dot.dataset.sid];
+                    if (screw) screw.dot = null;
+                    lockConnections.slice().forEach(conn => {
+                        if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                    });
+                    checkTempSlotLimit();
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
                     newDot.style.backgroundColor = color;
@@ -636,12 +824,11 @@
             for (const temp of tempSlots) {
                 if (temp.children.length === 0) {
                     const fromCell = dot.parentElement;
-                    const pid = fromCell.dataset.plateId;
-                    const plate = activePlates.find(p => p.id == pid);
-                    if (plate) {
-                        const target = plate.screws.find(s => s.dot === dot);
-                        if (target) target.dot = null;
-                    }
+                    const screw = screwMap[dot.dataset.sid];
+                    if (screw) screw.dot = null;
+                    lockConnections.slice().forEach(conn => {
+                        if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                    });
                     temp.appendChild(dot);
                     dot.style.position = "absolute";
                     // 记录本次拔出的格子，供生成算法使用
@@ -649,6 +836,7 @@
                     checkPlateRemoval(fromCell);
                     updateInfo();
                     checkVictory();
+                    checkTempSlotLimit();
                     return;
                 }
             }
@@ -666,6 +854,7 @@
                 } else {
                     const hint = document.createElement("div");
                     hint.className = "hint";
+
                     hint.textContent = "点击开启";
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
@@ -675,6 +864,14 @@
                     });
                 }
             });
+        }
+
+        function checkTempSlotLimit() {
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            if (tempDots >= 5) {
+                showMessage("💥 游戏失败！临时槽已满！");
+                disableGame();
+            }
         }
 
         function showMessage(msg) {
@@ -725,6 +922,7 @@
             spawnNextPlate();
         }
         initBoxes();
+        setupLocks();
     </script>
 </body>
 
