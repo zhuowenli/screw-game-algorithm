@@ -281,7 +281,7 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
-        const AUTO_PLAY_INTERVAL = 300;
+        const AUTO_PLAY_INTERVAL = 250; // 自动点击间隔
         let TOTAL_BOXES = 50;
         let TOTAL_SCREWS = TOTAL_BOXES * 3;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
@@ -477,6 +477,7 @@
                 }
             }
             nextPlateIndex = 0;
+            failedPlates = [];
         }
 
         function initTempSlots() {
@@ -614,11 +615,12 @@
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
                 if (screw.cell) {
-                    checkPlateRemoval(screw.cell);
+                    // checkPlateRemoval(screw.cell);
                     screw.cell.dataset.plateId = '';
                 }
             }
             activePlates = activePlates.filter(p => p !== plate);
+            cleanupOrphanLocks();
             updateDotBlockStates();
             updateInfo();
         }
@@ -651,16 +653,38 @@
         }
 
         function cleanupOrphanLocks() {
-            const connectedControllers = new Set();
-            const connectedLocked = new Set();
-
+            // Remove connections that reference missing screws or dots
             lockConnections = lockConnections.filter(conn => {
                 const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
-                if (valid) {
-                    connectedControllers.add(conn.controller.id);
-                    connectedLocked.add(conn.locked.id);
-                    return true;
+                if (!valid) {
+                    conn.line && conn.line.remove();
+                    if (conn.locked.overlay) {
+                        conn.locked.overlay.remove();
+                        conn.locked.overlay = null;
+                    }
+                    if (conn.locked.dot) {
+                        conn.locked.dot.dataset.blocked = 'false';
+                        conn.locked.dot.classList.remove('blocked');
+                    }
+                    conn.locked.locked = false;
+                    conn.locked.controller = null;
+                    conn.controller.controls = null;
+                    if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+                    if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
                 }
+                return valid;
+            });
+
+            // Break pairs of screws locked to each other
+            const mutual = new Set();
+            for (const conn of lockConnections) {
+                const partner = lockConnections.find(c => c.controller === conn.locked && c.locked === conn.controller);
+                if (partner) {
+                    mutual.add(conn);
+                    mutual.add(partner);
+                }
+            }
+            for (const conn of mutual) {
                 conn.line && conn.line.remove();
                 if (conn.locked.overlay) {
                     conn.locked.overlay.remove();
@@ -673,7 +697,18 @@
                 conn.locked.locked = false;
                 conn.locked.controller = null;
                 conn.controller.controls = null;
-                return false;
+                if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+                if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
+            }
+            if (mutual.size > 0) {
+                lockConnections = lockConnections.filter(c => !mutual.has(c));
+            }
+
+            const connectedControllers = new Set();
+            const connectedLocked = new Set();
+            lockConnections.forEach(conn => {
+                connectedControllers.add(conn.controller.id);
+                connectedLocked.add(conn.locked.id);
             });
 
             for (const id in screwMap) {
@@ -733,6 +768,9 @@
             conn.locked.controller = null;
             conn.controller.controls = null;
             lockConnections = lockConnections.filter(c => c !== conn);
+            cleanupOrphanLocks();
+            if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+            if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
         }
 
         function applyLock(controller, locked) {
@@ -787,28 +825,57 @@
             }
         }
 
+        let failedPlates = [];
+
         function spawnNextPlate() {
+            if (activePlates.length >= MAX_VISIBLE_PLATES) return;
+
+            let attempts = 0;
+            while (failedPlates.length > 0 && activePlates.length < MAX_VISIBLE_PLATES && attempts < failedPlates
+                .length) {
+                const plate = failedPlates.shift();
+                if (spawnPlate(plate)) {
+                    setupLocks();
+                } else {
+                    failedPlates.push(plate);
+                }
+                attempts++;
+            }
+
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
                 const next = plates[nextPlateIndex++];
                 if (spawnPlate(next)) {
                     setupLocks();
-                    break;
+                } else {
+                    failedPlates.push(next);
                 }
+                if (activePlates.length >= MAX_VISIBLE_PLATES) break;
             }
         }
 
         function checkPlateRemoval(cell) {
-            setTimeout(() => {
-                const pid = cell.dataset.plateId;
-                if (!pid) return;
-                const plate = activePlates.find(p => p.id == pid);
-                if (!plate) return;
-                const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                if (!hasDot) {
+            activePlates.forEach(plate => {
+                const dots = plate.screws.filter(s => s.cell && s.cell.querySelector('.dot') && s.dot);
+                if (dots.length === 0) {
                     removePlate(plate);
                     spawnNextPlate();
+                } else {
+                    const locked = plate.screws.filter(s => s.locked);
+                    if (dots.length === locked.length) {
+                        const s = locked[0];
+                        s.locked = false;
+                        s.controller = null;
+                        if (s.overlay) {
+                            s.overlay.remove();
+                            s.overlay = null;
+                        }
+                        if (s.dot) {
+                            s.dot.dataset.blocked = 'false';
+                            s.dot.classList.remove('blocked');
+                        }
+                    }
                 }
-            }, 100);
+            });
         }
 
         function setupBox(box) {
@@ -975,7 +1042,7 @@
                             setTimeout(() => showMessage(""), 1500);
                             updateInfo();
                             checkVictory();
-                        }, 300);
+                        }, 10);
                     }
                     return;
                 }
