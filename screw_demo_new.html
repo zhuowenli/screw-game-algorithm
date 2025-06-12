@@ -528,9 +528,6 @@
                 return false;
             });
 
-            console.log(connectedLocked);
-            console.log(connectedControllers);
-
             for (const id in screwMap) {
                 const s = screwMap[id];
                 if (s.locked && !connectedLocked.has(s.id) && !connectedControllers.has(s.id)) {
