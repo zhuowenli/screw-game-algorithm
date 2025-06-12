@@ -1089,17 +1089,24 @@
             return chain;
         }
 
-        function tryClickDot(dot) {
+        function tryClickDot(dot, reason) {
             const screw = screwMap[dot.dataset.sid];
             const chain = getChain(screw);
             const free = tempSlotsState.filter(d => d === null).length;
-            if (free < chain.length) return false;
+            if (free < chain.length) {
+                console.log('auto: not enough temp slots for chain', chain.length, reason);
+                return false;
+            }
             for (const s of chain) {
                 if (!s.dot || s.dot.dataset.blocked === 'true') return false;
+            }
+            if (chain.length > 0) {
+                console.log('auto: unlocking chain length', chain.length, reason);
             }
             for (const s of chain) {
                 handleDotClick(s.dot);
             }
+            console.log('auto: click', dot.dataset.color, reason);
             handleDotClick(dot);
             return true;
         }
@@ -1115,16 +1122,26 @@
                 const color = box.dataset.color;
                 const dots = [...document.querySelectorAll('#game-board .dot')].filter(d => d.dataset.color === color);
                 for (const dot of dots) {
-                    if (tryClickDot(dot)) return;
+                    if (tryClickDot(dot, 'box ' + color)) return;
                 }
             }
 
+            let bestPlate = null;
+            let bestDots = null;
+            let bestCount = Infinity;
+            const freeSlots = tempSlotsState.filter(d => d === null).length;
             for (const plate of activePlates) {
                 const dots = plate.screws.map(s => s.dot).filter(Boolean);
-                const free = tempSlotsState.filter(d => d === null).length;
-                if (free < dots.length) continue;
-                for (const dot of dots) {
-                    if (tryClickDot(dot)) return;
+                if (dots.length === 0) continue;
+                if (dots.length <= freeSlots && dots.length < bestCount) {
+                    bestPlate = plate;
+                    bestDots = dots;
+                    bestCount = dots.length;
+                }
+            }
+            if (bestPlate) {
+                for (const dot of bestDots) {
+                    if (tryClickDot(dot, 'min plate ' + bestCount)) return;
                 }
             }
         }
