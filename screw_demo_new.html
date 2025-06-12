@@ -725,14 +725,11 @@
             }
         }
 
-
-
         function spawnNextPlate() {
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
-                // count colors currently on the board
-                const boardCounts = countBoardColors();
-                // const next = plates[nextPlateIndex++];
-                if (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0) {
+                const next = plates[nextPlateIndex++];
+                if (spawnPlate(next)) {
+                    setupLocks();
                     break;
                 }
             }
@@ -759,12 +756,8 @@
         }
 
         function setupBox(box) {
-            // clear previous filled dots and count them as eliminated
-            [...box.children].forEach(child => {
-                if (child.dataset.filled) {
-                    colorOnField[child.dataset.color]--;
-                }
-            });
+            // count colors currently on the board
+            const boardCounts = countBoardColors();
 
             const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
             tempSlotsState.forEach(d => {
@@ -776,7 +769,7 @@
 
             const candidateColors = COLORS.filter(c =>
                 boxPool[c] > 0 &&
-                (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
+                (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0)
             );
             let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
             if (availableColors.length === 0) {
