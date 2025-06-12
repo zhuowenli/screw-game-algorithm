@@ -256,7 +256,6 @@
         const boxPool = {
             ...COLOR_BOX_TOTALS
         };
-        const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
 
         let boardData = [];
         let boardState = [];
@@ -476,7 +475,6 @@
             dot.addEventListener("click", () => handleDotClick(dot));
             cell.appendChild(dot);
             colorPool[screw.color]--;
-            colorOnField[screw.color]++;
             return dot;
         }
 
@@ -495,7 +493,6 @@
                 renderTempSlots();
             }
             dot.remove();
-            colorOnField[color]--;
             if (cell) checkPlateRemoval(cell);
         }
 
@@ -727,13 +724,9 @@
                 }
             }
         }
-        // clear previous filled dots
-
-        function spawnNextPlate() {
-            while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
-                const next = plates[nextPlateIndex++];
-                if (spawnPlate(next)) {
-                    setupLocks();
+            // count colors currently on the board
+            const boardCounts = countBoardColors();
+                (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0)
                     break;
                 }
             }
@@ -822,6 +815,16 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
+        function countBoardColors() {
+            const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            for (const plate of activePlates) {
+                for (const screw of plate.screws) {
+                    if (screw.dot) counts[screw.color]++;
+                }
+            }
+            return counts;
+        }
+
                     removeDot(matchingDots[i]);
                 }
                 setTimeout(() => {
@@ -925,8 +928,9 @@
 
         function initBoxes() {
 
-            boxes.forEach((box, i) => {
-                box.innerHTML = "";
+            const boardCounts = countBoardColors();
+            const onBoard = Object.values(boardCounts).reduce((a, b) => a + b, 0);
+                const screws = colorPool[c] + boardCounts[c];
                 if (box.dataset.enabled === "true") {
                     setupBox(box);
                 } else {
