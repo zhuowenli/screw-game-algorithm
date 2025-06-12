@@ -199,13 +199,7 @@
         </div>
     </div>
 
-    <div id="temp-slots">
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-        <div class="temp-slot"></div>
-    </div>
+    <div id="temp-slots"></div>
 
     <div id="info-panel">
         <div>关卡总螺丝数:<span id="total-count"></span></div>
@@ -237,6 +231,7 @@
         const MAX_ACTIVATED_CELLS = 200;
         const TOTAL_SCREWS = 90;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
+        let MAX_TEMP_SLOTS = 5;
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
 
@@ -264,13 +259,18 @@
         const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
         let eliminated = 0;
 
+        let boardData = [];
+        let boardState = [];
+
         const board = document.getElementById("game-board");
         const lineLayer = document.getElementById("line-layer");
+        const tempSlotsContainer = document.getElementById("temp-slots");
+        let tempSlots = null;
+        let tempSlotsState = [];
         let lockConnections = [];
         const screwMap = {};
         let nextScrewId = 0;
         const boxes = document.querySelectorAll(".box");
-        const tempSlots = document.querySelectorAll(".temp-slot");
         const message = document.getElementById("message");
         const totalCountEl = document.getElementById("total-count");
         const eliminatedCountEl = document.getElementById("eliminated-count");
@@ -326,7 +326,8 @@
         }
 
         // 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
-        function generatePlates() {
+        function generateBoardData() {
+            boardData = [];
             let remaining = TOTAL_SCREWS;
             let id = 0;
             const tempPool = {
@@ -360,31 +361,110 @@
                         row: pos.row,
                         col: pos.col,
                         color,
+                        group: id,
+                        stage: 0,
+                        id: nextScrewId++
+                    });
+                    tempPool[color]--;
+                    remaining--;
+                }
+                boardData.push({
+                    id: id++,
+                    row,
+                    col,
+                    width,
+                    height,
+                    screws
+                });
+            }
+        }
+
+        function initBoardState() {
+            nextPlateZ = 1000;
+            plates = boardData.map(p => {
+                const plate = {
+                    id: p.id,
+                    row: p.row,
+                    col: p.col,
+                    width: p.width,
+                    height: p.height,
+                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
+                    screws: p.screws.map(s => ({
+                        id: s.id,
+                        row: s.row,
+                        col: s.col,
+                        color: s.color,
+                        group: s.group,
+                        stage: s.stage,
                         cell: null,
                         dot: null,
                         locked: false,
                         controller: null,
                         controls: null,
                         overlay: null,
-                        plateId: id,
-                        id: nextScrewId++
-                    });
-                    screwMap[screws[screws.length - 1].id] = screws[screws.length - 1];
-                    tempPool[color]--;
-                    remaining--;
-                }
-                plates.push({
-                    id: id++,
-                    row,
-                    col,
-                    width,
-                    height,
-                    color: `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.6)`,
-                    screws,
+                        plateId: p.id
+                    })),
                     zIndex: nextPlateZ
-                });
+                };
                 nextPlateZ -= 10;
+                return plate;
+            });
+            boardState = plates;
+            for (const k in screwMap) delete screwMap[k];
+            for (const p of plates) {
+                for (const s of p.screws) {
+                    screwMap[s.id] = s;
+                }
             }
+            nextPlateIndex = 0;
+        }
+
+        function initTempSlots() {
+            tempSlotsState = Array(MAX_TEMP_SLOTS).fill(null);
+            renderTempSlots();
+        }
+
+        function renderTempSlots() {
+            tempSlotsContainer.innerHTML = "";
+            for (let i = 0; i < MAX_TEMP_SLOTS; i++) {
+                const slot = document.createElement("div");
+                slot.className = "temp-slot";
+                if (tempSlotsState[i]) {
+                    slot.appendChild(tempSlotsState[i]);
+                    tempSlotsState[i].style.position = "absolute";
+                }
+                tempSlotsContainer.appendChild(slot);
+            }
+            tempSlots = document.querySelectorAll(".temp-slot");
+        }
+
+        function getBoardInfo() {
+            return {
+                layers: JSON.parse(JSON.stringify(boardData)),
+                state: JSON.parse(JSON.stringify(boardState))
+            };
+        }
+
+        function setDifficulty(opts) {
+            if (opts.tempSlots !== undefined) {
+                MAX_TEMP_SLOTS = opts.tempSlots;
+                initTempSlots();
+            }
+            if (opts.colorPool) {
+                for (const c in opts.colorPool) {
+                    if (colorPool[c] !== undefined) {
+                        colorPool[c] = opts.colorPool[c];
+                    }
+                }
+            }
+            if (opts.boxPool) {
+                for (const c in opts.boxPool) {
+                    if (boxPool[c] !== undefined) {
+                        boxPool[c] = opts.boxPool[c];
+                    }
+                }
+            }
+            updateInfo();
         }
 
         function spawnDot(screw, cell) {
@@ -410,10 +490,15 @@
                 cleanupOrphanLocks();
                 if (conn.controller.id === screw.id || conn.locked.id === screw.id) removeConnection(conn);
             });
+            const idx = tempSlotsState.findIndex(d => d === dot);
+            if (idx !== -1) {
+                tempSlotsState[idx] = null;
+                renderTempSlots();
+            }
             dot.remove();
             colorOnField[color]--;
             eliminated++;
-            if (cell) checkPlateRemoval(cell);
+            if (cell && cell.classList.contains('cell')) checkPlateRemoval(cell);
         }
 
         // 在场景中生成一个板块及其螺丝
@@ -674,9 +759,9 @@
             });
 
             const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
-            tempSlots.forEach(t => {
-                if (t.children.length > 0) {
-                    const c = t.children[0].dataset.color;
+            tempSlotsState.forEach(d => {
+                if (d) {
+                    const c = d.dataset.color;
                     tempCounts[c]++;
                 }
             });
@@ -720,12 +805,9 @@
 
         function absorbTempDots(color, box) {
             const matchingDots = [];
-            tempSlots.forEach(temp => {
-                if (temp.children.length > 0) {
-                    const tempDot = temp.children[0];
-                    if (tempDot.dataset.color === color) {
-                        matchingDots.push(tempDot);
-                    }
+            tempSlotsState.forEach(d => {
+                if (d && d.dataset.color === color) {
+                    matchingDots.push(d);
                 }
             });
 
@@ -752,7 +834,7 @@
                         newDot.dataset.color = color;
                         newDot.dataset.filled = "true";
                         emptySlot.replaceWith(newDot);
-                        dot.remove();
+                        removeDot(dot);
                     }
                 }
                 updateInfo();
@@ -761,11 +843,9 @@
         }
 
 
-
         function totalRemainingPool() {
             return COLORS.reduce((s, c) => s + colorPool[c], 0);
         }
-
 
         function handleDotClick(dot) {
             if (dot.dataset.blocked === "true") return;
@@ -773,7 +853,6 @@
             for (const box of boxes) {
                 if (box.dataset.enabled !== "true") continue;
                 if (box.dataset.color !== color) continue;
-
                 const emptySlot = [...box.children].find(el => el.className === "slot" && !el.dataset.filled);
                 if (emptySlot) {
                     const fromCell = dot.parentElement;
@@ -811,24 +890,24 @@
                 }
             }
 
-            for (const temp of tempSlots) {
-                if (temp.children.length === 0) {
-                    const fromCell = dot.parentElement;
-                    const screw = screwMap[dot.dataset.sid];
-                    if (screw) screw.dot = null;
-                    lockConnections.slice().forEach(conn => {
-                        if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
-                    });
-                    temp.appendChild(dot);
-                    dot.style.position = "absolute";
-                    // 记录本次拔出的格子，供生成算法使用
-                    lastRemovedCell = fromCell;
-                    checkPlateRemoval(fromCell);
-                    updateInfo();
-                    checkVictory();
-                    checkTempSlotLimit();
-                    return;
-                }
+            const emptyIndex = tempSlotsState.findIndex(s => s === null);
+            if (emptyIndex !== -1) {
+                const fromCell = dot.parentElement;
+                const screw = screwMap[dot.dataset.sid];
+                if (screw) screw.dot = null;
+                lockConnections.slice().forEach(conn => {
+                    if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                });
+                tempSlotsState[emptyIndex] = dot;
+                renderTempSlots();
+                dot.style.position = "absolute";
+                // 记录本次拔出的格子，供生成算法使用
+                lastRemovedCell = fromCell;
+                checkPlateRemoval(fromCell);
+                updateInfo();
+                checkVictory();
+                checkTempSlotLimit();
+                return;
             }
 
             showMessage("💥 游戏失败！临时槽已满！");
@@ -857,8 +936,8 @@
         }
 
         function checkTempSlotLimit() {
-            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
-            if (tempDots >= 5) {
+            const tempDots = tempSlotsState.filter(d => d).length;
+            if (tempDots >= MAX_TEMP_SLOTS) {
                 showMessage("💥 游戏失败！临时槽已满！");
                 disableGame();
             }
@@ -874,7 +953,7 @@
             const queue = totalRemainingPool();
             const onBoard = document.querySelectorAll("#game-board .dot").length;
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
-            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            const tempDots = tempSlotsState.filter(d => d).length;
             const remaining = queue + boxDots + tempDots + onBoard;
             remainingCountEl.textContent = remaining;
             onboardCountEl.textContent = onBoard;
@@ -898,7 +977,7 @@
         function checkVictory() {
             const boardDots = document.querySelectorAll('#game-board .dot').length;
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
-            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            const tempDots = tempSlotsState.filter(d => d).length;
             if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
                 showMessage('🏆 游戏胜利！');
                 disableGame();
@@ -907,7 +986,9 @@
 
         createGrid();
         activateCells();
-        generatePlates();
+        initTempSlots();
+        generateBoardData();
+        initBoardState();
         for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
             spawnNextPlate();
         }
