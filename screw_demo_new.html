@@ -724,9 +724,15 @@
                 }
             }
         }
-            // count colors currently on the board
-            const boardCounts = countBoardColors();
-                (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0)
+
+
+
+        function spawnNextPlate() {
+            while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
+                // count colors currently on the board
+                const boardCounts = countBoardColors();
+                // const next = plates[nextPlateIndex++];
+                if (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0) {
                     break;
                 }
             }
@@ -815,15 +821,15 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
-        function countBoardColors() {
-            const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
-            for (const plate of activePlates) {
-                for (const screw of plate.screws) {
-                    if (screw.dot) counts[screw.color]++;
-                }
-            }
-            return counts;
-        }
+                    function countBoardColors() {
+                        const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
+                        for (const plate of activePlates) {
+                            for (const screw of plate.screws) {
+                                if (screw.dot) counts[screw.color]++;
+                            }
+                        }
+                        return counts;
+                    }
 
                     removeDot(matchingDots[i]);
                 }
@@ -857,6 +863,16 @@
 
         function totalRemainingPool() {
             return COLORS.reduce((s, c) => s + colorPool[c], 0);
+        }
+
+        function countBoardColors() {
+            const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            for (const plate of activePlates) {
+                for (const screw of plate.screws) {
+                    if (screw.dot) counts[screw.color]++;
+                }
+            }
+            return counts;
         }
 
         function handleDotClick(dot) {
@@ -927,16 +943,14 @@
         }
 
         function initBoxes() {
-
-            const boardCounts = countBoardColors();
-            const onBoard = Object.values(boardCounts).reduce((a, b) => a + b, 0);
-                const screws = colorPool[c] + boardCounts[c];
+            usedBoxColors.clear();
+            boxes.forEach((box, i) => {
+                box.innerHTML = "";
                 if (box.dataset.enabled === "true") {
                     setupBox(box);
                 } else {
                     const hint = document.createElement("div");
                     hint.className = "hint";
-
                     hint.textContent = "点击开启";
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
@@ -963,13 +977,14 @@
         function updateInfo() {
             totalCountEl.textContent = TOTAL_SCREWS;
             const queue = totalRemainingPool();
-            const onBoard = activePlates.reduce((sum, p) => sum + p.screws.filter(s => s.dot).length, 0);
+            const boardCounts = countBoardColors();
+            const onBoard = Object.values(boardCounts).reduce((a, b) => a + b, 0);
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
             const tempDots = tempSlotsState.filter(d => d).length;
             const remaining = queue + boxDots + tempDots + onBoard;
             const eliminated = TOTAL_SCREWS - remaining;
-            eliminatedCountEl.textContent = eliminated;
             remainingCountEl.textContent = remaining;
+            eliminatedCountEl.textContent = eliminated;
             onboardCountEl.textContent = onBoard;
             queueCountEl.textContent = queue;
             const dots = document.querySelectorAll("#game-board .dot");
@@ -977,7 +992,7 @@
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
-                const screws = colorPool[c] + colorOnField[c];
+                const screws = colorPool[c] + boardCounts[c];
                 const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
                 return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
             }).join("");
