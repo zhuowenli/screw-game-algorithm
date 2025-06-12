@@ -859,19 +859,20 @@
                 if (dots.length === 0) {
                     removePlate(plate);
                     spawnNextPlate();
-                }
-                const locked = plate.screws.filter(s => s.locked);
-                if (dots.length === locked.length) {
-                    const s = locked[0];
-                    s.locked = false;
-                    s.controller = null;
-                    if (s.overlay) {
-                        s.overlay.remove();
-                        s.overlay = null;
-                    }
-                    if (s.dot) {
-                        s.dot.dataset.blocked = 'false';
-                        s.dot.classList.remove('blocked');
+                } else {
+                    const locked = plate.screws.filter(s => s.locked);
+                    if (dots.length === locked.length) {
+                        const s = locked[0];
+                        s.locked = false;
+                        s.controller = null;
+                        if (s.overlay) {
+                            s.overlay.remove();
+                            s.overlay = null;
+                        }
+                        if (s.dot) {
+                            s.dot.dataset.blocked = 'false';
+                            s.dot.classList.remove('blocked');
+                        }
                     }
                 }
             });
