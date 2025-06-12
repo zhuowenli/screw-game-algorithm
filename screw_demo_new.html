@@ -558,6 +558,7 @@
                 if (screw.cell) screw.cell.dataset.plateId = '';
             }
             activePlates = activePlates.filter(p => p !== plate);
+            updateDotBlockStates();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
