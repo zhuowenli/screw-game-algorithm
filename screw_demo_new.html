@@ -545,6 +545,7 @@
             plate.overlay = overlay;
             activePlates.push(plate);
             updateDotBlockStates();
+            updateInfo();
             return true;
         }
 
@@ -555,6 +556,7 @@
                 lockConnections.slice().forEach(conn => {
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
+            updateInfo();
                 if (screw.cell) {
                     checkPlateRemoval(screw.cell);
                     screw.cell.dataset.plateId = '';
@@ -970,6 +972,7 @@
             queueCountEl.textContent = queue;
             const dots = document.querySelectorAll("#game-board .dot");
             const colors = new Set();
+        updateInfo();
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
