@@ -619,6 +619,7 @@
                 }
             }
             activePlates = activePlates.filter(p => p !== plate);
+            cleanupOrphanLocks();
             updateDotBlockStates();
             updateInfo();
         }
@@ -733,6 +734,9 @@
             conn.locked.controller = null;
             conn.controller.controls = null;
             lockConnections = lockConnections.filter(c => c !== conn);
+            cleanupOrphanLocks();
+            if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
+            if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
         }
 
         function applyLock(controller, locked) {
@@ -799,6 +803,7 @@
 
         function checkPlateRemoval(cell) {
             setTimeout(() => {
+                cleanupOrphanLocks();
                 const pid = cell.dataset.plateId;
                 if (!pid) return;
                 const plate = activePlates.find(p => p.id == pid);
