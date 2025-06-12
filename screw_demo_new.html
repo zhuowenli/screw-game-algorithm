@@ -256,8 +256,6 @@
         const boxPool = {
             ...COLOR_BOX_TOTALS
         };
-        const colorOnField = Object.fromEntries(COLORS.map(c => [c, 0]));
-        let eliminated = 0;
 
         let boardData = [];
         let boardState = [];
@@ -477,7 +475,6 @@
             dot.addEventListener("click", () => handleDotClick(dot));
             cell.appendChild(dot);
             colorPool[screw.color]--;
-            colorOnField[screw.color]++;
             return dot;
         }
 
@@ -496,8 +493,6 @@
                 renderTempSlots();
             }
             dot.remove();
-            colorOnField[color]--;
-            eliminated++;
             if (cell) checkPlateRemoval(cell);
         }
 
@@ -545,6 +540,7 @@
             plate.overlay = overlay;
             activePlates.push(plate);
             updateDotBlockStates();
+            updateInfo();
             return true;
         }
 
@@ -555,9 +551,14 @@
                 lockConnections.slice().forEach(conn => {
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
-                if (screw.cell) screw.cell.dataset.plateId = '';
+                if (screw.cell) {
+                    checkPlateRemoval(screw.cell);
+                    screw.cell.dataset.plateId = '';
+                }
             }
             activePlates = activePlates.filter(p => p !== plate);
+            updateDotBlockStates();
+            updateInfo();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
@@ -722,7 +723,6 @@
                     applyLock(controller, locked);
                 }
             }
-            updateDotBlockStates();
         }
 
         function spawnNextPlate() {
@@ -738,25 +738,26 @@
         function checkPlateRemoval(cell) {
             setTimeout(() => {
                 const pid = cell.dataset.plateId;
+                console.log('pid:', pid);
                 if (!pid) return;
                 const plate = activePlates.find(p => p.id == pid);
+                console.log('plate:', plate);
                 if (!plate) return;
                 const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
+                console.log('hasDot:', hasDot);
                 if (!hasDot) {
                     removePlate(plate);
                     spawnNextPlate();
+                } else {
+                    console.log('hasDot:',
+                        plate.screws.find(s => s.cell && s.cell.querySelector('.dot') && s.dot));
                 }
-            }, 10);
+            }, 100);
         }
 
         function setupBox(box) {
-            // clear previous filled dots and count them as eliminated
-            [...box.children].forEach(child => {
-                if (child.dataset.filled) {
-                    colorOnField[child.dataset.color]--;
-                    eliminated++;
-                }
-            });
+            // count colors currently on the board
+            const boardCounts = countBoardColors();
 
             const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
             tempSlotsState.forEach(d => {
@@ -768,7 +769,7 @@
 
             const candidateColors = COLORS.filter(c =>
                 boxPool[c] > 0 &&
-                (colorPool[c] > 0 || colorOnField[c] > 0 || tempCounts[c] > 0)
+                (colorPool[c] > 0 || boardCounts[c] > 0 || tempCounts[c] > 0)
             );
             let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
             if (availableColors.length === 0) {
@@ -813,6 +814,16 @@
 
             if (matchingDots.length >= 3) {
                 for (let i = 0; i < 3; i++) {
+                    function countBoardColors() {
+                        const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
+                        for (const plate of activePlates) {
+                            for (const screw of plate.screws) {
+                                if (screw.dot) counts[screw.color]++;
+                            }
+                        }
+                        return counts;
+                    }
+
                     removeDot(matchingDots[i]);
                 }
                 setTimeout(() => {
@@ -845,6 +856,16 @@
 
         function totalRemainingPool() {
             return COLORS.reduce((s, c) => s + colorPool[c], 0);
+        }
+
+        function countBoardColors() {
+            const counts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            for (const plate of activePlates) {
+                for (const screw of plate.screws) {
+                    if (screw.dot) counts[screw.color]++;
+                }
+            }
+            return counts;
         }
 
         function handleDotClick(dot) {
@@ -923,7 +944,6 @@
                 } else {
                     const hint = document.createElement("div");
                     hint.className = "hint";
-
                     hint.textContent = "点击开启";
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
@@ -949,13 +969,15 @@
 
         function updateInfo() {
             totalCountEl.textContent = TOTAL_SCREWS;
-            eliminatedCountEl.textContent = eliminated;
             const queue = totalRemainingPool();
-            const onBoard = document.querySelectorAll("#game-board .dot").length;
+            const boardCounts = countBoardColors();
+            const onBoard = Object.values(boardCounts).reduce((a, b) => a + b, 0);
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
             const tempDots = tempSlotsState.filter(d => d).length;
             const remaining = queue + boxDots + tempDots + onBoard;
+            const eliminated = TOTAL_SCREWS - remaining;
             remainingCountEl.textContent = remaining;
+            eliminatedCountEl.textContent = eliminated;
             onboardCountEl.textContent = onBoard;
             queueCountEl.textContent = queue;
             const dots = document.querySelectorAll("#game-board .dot");
@@ -963,7 +985,7 @@
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
-                const screws = colorPool[c] + colorOnField[c];
+                const screws = colorPool[c] + boardCounts[c];
                 const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
                 return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
             }).join("");
@@ -976,7 +998,8 @@
 
         function checkVictory() {
             const boardDots = document.querySelectorAll('#game-board .dot').length;
-            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length,
+                0);
             const tempDots = tempSlotsState.filter(d => d).length;
             if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
                 showMessage('🏆 游戏胜利！');
