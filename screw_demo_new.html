@@ -281,6 +281,7 @@
         const ROWS = 30;
         const COLS = 20;
         const MAX_ACTIVATED_CELLS = 200;
+        const AUTO_PLAY_INTERVAL = 300;
         let TOTAL_BOXES = 50;
         let TOTAL_SCREWS = TOTAL_BOXES * 3;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
@@ -307,8 +308,12 @@
             COLOR_BOX_TOTALS = Object.fromEntries(
                 Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3])
             );
-            colorPool = { ...COLOR_TOTALS };
-            boxPool = { ...COLOR_BOX_TOTALS };
+            colorPool = {
+                ...COLOR_TOTALS
+            };
+            boxPool = {
+                ...COLOR_BOX_TOTALS
+            };
         }
 
         let boardData = [];
@@ -340,6 +345,7 @@
         let plates = [];
         let nextPlateIndex = 0; // 下一个需要显示的板块索引
         let activePlates = [];
+        let isClickDot = false;
         // 控制板块与螺丝的层级，每层之间相差 10，方便调试
         let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
 
@@ -926,6 +932,13 @@
             return colors[colors.length - 1];
         }
 
+        function checkClickDot() {
+            isClickDot = true;
+            setTimeout(() => {
+                isClickDot = false;
+            }, 1000);
+        }
+
         function handleDotClick(dot) {
             if (dot.dataset.blocked === "true") return;
             const color = dot.dataset.color;
@@ -940,7 +953,6 @@
                     lockConnections.slice().forEach(conn => {
                         if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                     });
-                    checkTempSlotLimit();
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
                     newDot.style.backgroundColor = color;
@@ -985,6 +997,7 @@
                 checkPlateRemoval(fromCell);
                 updateInfo();
                 checkVictory();
+                // checkClickDot();
                 checkTempSlotLimit();
                 return;
             }
@@ -1025,11 +1038,16 @@
         }
 
         function checkTempSlotLimit() {
-            const tempDots = tempSlotsState.filter(d => d).length;
-            if (tempDots >= MAX_TEMP_SLOTS) {
-                showMessage("💥 游戏失败！临时槽已满！");
-                disableGame();
-            }
+            if (isClickDot) return;
+            setTimeout(() => {
+                const tempDots = tempSlotsState.filter(d => d).length;
+                if (tempDots >= MAX_TEMP_SLOTS) {
+                    showMessage("💥 游戏失败！临时槽已满！");
+                    console.log('tempDots:', tempDots, 'MAX_TEMP_SLOTS:', MAX_TEMP_SLOTS);
+                    console.log('======================================');
+                    disableGame();
+                }
+            }, 1000);
         }
 
         function showMessage(msg) {
@@ -1094,19 +1112,15 @@
             const chain = getChain(screw);
             const free = tempSlotsState.filter(d => d === null).length;
             if (free < chain.length) {
-                console.log('auto: not enough temp slots for chain', chain.length, reason);
                 return false;
             }
             for (const s of chain) {
                 if (!s.dot || s.dot.dataset.blocked === 'true') return false;
             }
-            if (chain.length > 0) {
-                console.log('auto: unlocking chain length', chain.length, reason);
-            }
+            if (chain.length > 0) {}
             for (const s of chain) {
                 handleDotClick(s.dot);
             }
-            console.log('auto: click', dot.dataset.color, reason);
             handleDotClick(dot);
             return true;
         }
@@ -1122,7 +1136,10 @@
                 const color = box.dataset.color;
                 const dots = [...document.querySelectorAll('#game-board .dot')].filter(d => d.dataset.color === color);
                 for (const dot of dots) {
-                    if (tryClickDot(dot, 'box ' + color)) return;
+                    if (dot.dataset.blocked !== 'true') {
+                        console.log('当前有匹配盒子颜色，自动点击:', dot.dataset.sid, 'color:', color);
+                        if (tryClickDot(dot, 'box ' + color)) return;
+                    }
                 }
             }
 
@@ -1133,7 +1150,7 @@
             for (const plate of activePlates) {
                 const dots = plate.screws.map(s => s.dot).filter(Boolean);
                 if (dots.length === 0) continue;
-                if (dots.length <= freeSlots && dots.length < bestCount) {
+                if (dots.length < freeSlots && dots.length < bestCount) {
                     bestPlate = plate;
                     bestDots = dots;
                     bestCount = dots.length;
@@ -1141,14 +1158,19 @@
             }
             if (bestPlate) {
                 for (const dot of bestDots) {
-                    if (tryClickDot(dot, 'min plate ' + bestCount)) return;
+                    if (dot.dataset.blocked !== 'true') {
+                        console.log('没有匹配颜色螺丝，尝试解锁板块螺丝:', dot);
+                        if (tryClickDot(dot, 'min plate ' + bestCount)) return;
+                    }
                 }
             }
+
+            console.log('自动点击失败');
         }
 
         function startAutoPlay() {
             if (autoPlayTimer) return;
-            autoPlayTimer = setInterval(autoPlayStep, 1000);
+            autoPlayTimer = setInterval(autoPlayStep, AUTO_PLAY_INTERVAL);
             autoBtn.textContent = '停止自动';
         }
 
