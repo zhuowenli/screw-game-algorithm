@@ -497,7 +497,7 @@
             }
             dot.remove();
             colorOnField[color]--;
-            eliminated++;
+            // eliminated++;
             if (cell) checkPlateRemoval(cell);
         }
 
@@ -555,7 +555,10 @@
                 lockConnections.slice().forEach(conn => {
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
-                if (screw.cell) screw.cell.dataset.plateId = '';
+                if (screw.cell) {
+                    checkPlateRemoval(screw.cell);
+                    screw.cell.dataset.plateId = '';
+                }
             }
             activePlates = activePlates.filter(p => p !== plate);
             updateDotBlockStates();
@@ -739,15 +742,21 @@
         function checkPlateRemoval(cell) {
             setTimeout(() => {
                 const pid = cell.dataset.plateId;
+                console.log('pid:', pid);
                 if (!pid) return;
                 const plate = activePlates.find(p => p.id == pid);
+                console.log('plate:', plate);
                 if (!plate) return;
                 const hasDot = plate.screws.some(s => s.cell && s.cell.querySelector('.dot') && s.dot);
+                console.log('hasDot:', hasDot);
                 if (!hasDot) {
                     removePlate(plate);
                     spawnNextPlate();
+                } else {
+                    console.log('hasDot:',
+                        plate.screws.find(s => s.cell && s.cell.querySelector('.dot') && s.dot));
                 }
-            }, 10);
+            }, 100);
         }
 
         function setupBox(box) {
