@@ -556,7 +556,6 @@
                 lockConnections.slice().forEach(conn => {
                     if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                 });
-            updateInfo();
                 if (screw.cell) {
                     checkPlateRemoval(screw.cell);
                     screw.cell.dataset.plateId = '';
@@ -564,6 +563,7 @@
             }
             activePlates = activePlates.filter(p => p !== plate);
             updateDotBlockStates();
+            updateInfo();
         }
 
         // 根据当前板块层级，控制螺丝的可点击状态
@@ -972,7 +972,6 @@
             queueCountEl.textContent = queue;
             const dots = document.querySelectorAll("#game-board .dot");
             const colors = new Set();
-        updateInfo();
             dots.forEach(d => colors.add(d.dataset.color));
             colorCountEl.textContent = colors.size;
             colorStats.innerHTML = COLORS.map(c => {
