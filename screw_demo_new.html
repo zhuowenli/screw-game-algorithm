@@ -792,6 +792,7 @@
                     lockConnections.slice().forEach(conn => {
                         if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
                     });
+                    checkTempSlotLimit();
                     const newDot = document.createElement("div");
                     newDot.className = "slot";
                     newDot.style.backgroundColor = color;
@@ -852,6 +853,14 @@
                 } else {
                     const hint = document.createElement("div");
                     hint.className = "hint";
+        function checkTempSlotLimit() {
+            const tempDots = [...tempSlots].reduce((s, t) => s + t.children.length, 0);
+            if (tempDots >= 5) {
+                showMessage("💥 游戏失败！临时槽已满！");
+                disableGame();
+            }
+        }
+
                     hint.textContent = "点击开启";
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
