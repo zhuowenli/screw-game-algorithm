@@ -726,7 +726,8 @@
                     applyLock(controller, locked);
                 }
             }
-            // clear previous filled dots
+        }
+        // clear previous filled dots
 
         function spawnNextPlate() {
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
@@ -763,7 +764,6 @@
             [...box.children].forEach(child => {
                 if (child.dataset.filled) {
                     colorOnField[child.dataset.color]--;
-                    eliminated++;
                 }
             });
 
@@ -924,9 +924,8 @@
         }
 
         function initBoxes() {
-            const onBoard = activePlates.reduce((sum, p) => sum + p.screws.filter(s => s.dot).length, 0);
-            const eliminated = TOTAL_SCREWS - remaining;
-            eliminatedCountEl.textContent = eliminated;
+
+            boxes.forEach((box, i) => {
                 box.innerHTML = "";
                 if (box.dataset.enabled === "true") {
                     setupBox(box);
@@ -959,12 +958,13 @@
 
         function updateInfo() {
             totalCountEl.textContent = TOTAL_SCREWS;
-            eliminatedCountEl.textContent = eliminated;
             const queue = totalRemainingPool();
-            const onBoard = document.querySelectorAll("#game-board .dot").length;
+            const onBoard = activePlates.reduce((sum, p) => sum + p.screws.filter(s => s.dot).length, 0);
             const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
             const tempDots = tempSlotsState.filter(d => d).length;
             const remaining = queue + boxDots + tempDots + onBoard;
+            const eliminated = TOTAL_SCREWS - remaining;
+            eliminatedCountEl.textContent = eliminated;
             remainingCountEl.textContent = remaining;
             onboardCountEl.textContent = onBoard;
             queueCountEl.textContent = queue;
@@ -986,7 +986,8 @@
 
         function checkVictory() {
             const boardDots = document.querySelectorAll('#game-board .dot').length;
-            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length, 0);
+            const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter(el => el.dataset.filled).length,
+                0);
             const tempDots = tempSlotsState.filter(d => d).length;
             if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
                 showMessage('🏆 游戏胜利！');
