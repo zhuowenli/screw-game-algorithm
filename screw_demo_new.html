@@ -870,7 +870,8 @@
             let currentGroups = new Set(lockConnections.map(c => c.locked.id));
             for (const plate of platesToCheck) {
                 const all = plate.screws;
-                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && s.controllers.length === 0);
+                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && s.controllers.length ===
+                    0);
                 for (const locked of candidates) {
                     if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
                     const requiredDepth = maxColorLockDepth(locked.color);
@@ -952,9 +953,11 @@
 
         function setupBox(box, isHint = false) {
             const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
-            tempSlotsState.forEach(d => {
-                if (d) tempCounts[d.dataset.color]++;
-            });
+            if (isHint) {
+                tempSlotsState.forEach(d => {
+                    if (d) tempCounts[d.dataset.color]++;
+                });
+            }
             const boardCounts = countBoardColors();
 
             let candidateColors = COLORS.filter(c => boxPool[c] > 0 && tempCounts[c] > 0);
