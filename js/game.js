@@ -25,6 +25,7 @@ let MAX_CONTROLLERS_PER_LOCK = 3; // 单个锁最多控制螺丝数量
 let MAX_TEMP_SLOTS = 5;
 // 记录最近一次拔出螺丝的格子
 let lastRemovedCell = null;
+let selectedDifficulty = 25; // 默认难度
 
 const DIFFICULTY_LEVELS = [];
 const NUM_DIFFICULTY_LEVELS = 50;
@@ -38,7 +39,7 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
     DIFFICULTY_LEVELS.push({
         level: level,
         colors: interpolate(5, 10, NUM_DIFFICULTY_LEVELS, i),
-        boxes: interpolate(30, 80, NUM_DIFFICULTY_LEVELS, i),
+        boxes: interpolate(40, 60, NUM_DIFFICULTY_LEVELS, i),
         tempSlots: 5,
         maxLockGroups: interpolate(2, 7, NUM_DIFFICULTY_LEVELS, i),
         maxControllers: interpolate(1, 5, NUM_DIFFICULTY_LEVELS, i),
@@ -56,16 +57,17 @@ let boxPool = {};
  * 根据总螺丝数量分配各种颜色的螺丝数量
  */
 function initPools() {
-    COLOR_TOTALS = Array(TOTAL_SCREWS)
-        .fill(0)
-        .map((_, i) => i)
-        .reduce((acc, i) => {
-            if (i % 3 === 0) {
-                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-                acc[color] = acc[color] ? acc[color] + 3 : 3;
+    COLOR_TOTALS = {};
+    COLORS.forEach((c) => (COLOR_TOTALS[c] = 0));
+
+    for (const plate of boardData) {
+        for (const screw of plate.screws) {
+            if (COLOR_TOTALS[screw.color] !== undefined) {
+                COLOR_TOTALS[screw.color]++;
             }
-            return acc;
-        }, {});
+        }
+    }
+
     COLOR_BOX_TOTALS = Object.fromEntries(Object.entries(COLOR_TOTALS).map(([c, n]) => [c, n / 3]));
     colorPool = {
         ...COLOR_TOTALS,
@@ -94,6 +96,7 @@ const eliminatedCountEl = document.getElementById('eliminated-count');
 const progressCountEl = document.getElementById('progress-count');
 const remainingCountEl = document.getElementById('remaining-count');
 const onboardCountEl = document.getElementById('onboard-count');
+const onboardColorCountEl = document.getElementById('onboard-color-count');
 const queueCountEl = document.getElementById('queue-count');
 const colorCountEl = document.getElementById('color-count');
 const colorStats = document.getElementById('color-stats');
@@ -162,13 +165,10 @@ function activateCells() {
  * 生成游戏面板数据
  * 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
  */
-function generateBoardData() {
+function generateBoardData(screwColorPlan) {
     boardData = [];
     let remaining = TOTAL_SCREWS;
     let id = 0;
-    const tempPool = {
-        ...COLOR_TOTALS,
-    };
     while (remaining > 0) {
         const screwCount = Math.min(remaining, Math.floor(Math.random() * 9) + 1);
         const width = Math.floor(Math.random() * 6) + 3;
@@ -191,8 +191,7 @@ function generateBoardData() {
         const plateCells = cells.slice(0, screwCount);
         const screws = [];
         for (const pos of plateCells) {
-            const colorsCanUse = COLORS.filter((c) => tempPool[c] > 0);
-            const color = colorsCanUse[Math.floor(Math.random() * colorsCanUse.length)];
+            const color = screwColorPlan.shift();
             screws.push({
                 row: pos.row,
                 col: pos.col,
@@ -201,7 +200,6 @@ function generateBoardData() {
                 stage: 0,
                 id: nextScrewId++,
             });
-            tempPool[color]--;
             remaining--;
         }
         boardData.push({
@@ -755,6 +753,65 @@ function getStageModifiers() {
 }
 
 /**
+ * 规划关卡中的颜色分布，实现颜色随进度递增
+ * @param {number} totalBoxes - 盒子总数
+ * @param {Array<string>} allColors - 当前关卡可用的所有颜色
+ * @returns {Array<string>} 一个包含所有螺丝颜色的打乱数组
+ */
+function planColorDistribution(totalBoxes, allColors) {
+    const maxColorsForLevel = allColors.length;
+    let screwColorPlan1 = [];
+    let screwColorPlan2 = [];
+    let screwColorPlan3 = [];
+
+    const stage1_boxes = Math.floor(totalBoxes * 0.2);
+    const stage2_boxes = Math.floor(totalBoxes * 0.4);
+    const stage3_boxes = totalBoxes - stage1_boxes - stage2_boxes;
+
+    // 阶段1: 使用较少的颜色
+    const stage1_colors = allColors.slice(0, Math.min(maxColorsForLevel, 4));
+    for (let i = 0; i < stage1_boxes; i++) {
+        const color = stage1_colors[Math.floor(Math.random() * stage1_colors.length)];
+        screwColorPlan1.push(color, color, color);
+    }
+
+    // 阶段2: 引入更多颜色
+    const stage2_colors = allColors.slice(0, Math.min(maxColorsForLevel, 6));
+    for (let i = 0; i < stage2_boxes; i++) {
+        const color = stage2_colors[Math.floor(Math.random() * stage2_colors.length)];
+        screwColorPlan2.push(color, color, color);
+    }
+
+    // 阶段3: 使用所有可用颜色
+    const stage3_colors = allColors;
+    for (let i = 0; i < stage3_boxes; i++) {
+        const color = stage3_colors[Math.floor(Math.random() * stage3_colors.length)];
+        screwColorPlan3.push(color, color, color);
+    }
+
+    // 打乱颜色顺序，使其在板块中随机分布
+    for (let i = screwColorPlan1.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [screwColorPlan1[i], screwColorPlan1[j]] = [screwColorPlan1[j], screwColorPlan1[i]];
+    }
+    for (let i = screwColorPlan2.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [screwColorPlan2[i], screwColorPlan2[j]] = [screwColorPlan2[j], screwColorPlan2[i]];
+    }
+    for (let i = screwColorPlan3.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [screwColorPlan3[i], screwColorPlan3[j]] = [screwColorPlan3[j], screwColorPlan3[i]];
+    }
+
+    console.log(screwColorPlan1);
+    console.log('screwColorPlan1:', stage1_colors, screwColorPlan1.length);
+    console.log('screwColorPlan2:', stage2_colors, screwColorPlan2.length);
+    console.log('screwColorPlan3:', stage3_colors, screwColorPlan3.length);
+
+    return [...screwColorPlan1, ...screwColorPlan2, ...screwColorPlan3];
+}
+
+/**
  * 设置锁定关系
  * @param {Array} newScrews 新螺丝数组（可选）
  */
@@ -1285,6 +1342,7 @@ function updateInfo() {
     progressCountEl.textContent = ((eliminated / TOTAL_SCREWS) * 100).toFixed(2) + '%';
     onboardCountEl.textContent = onBoard;
     queueCountEl.textContent = queue;
+    onboardColorCountEl.textContent = Object.keys(boardCounts).length;
     const dots = document.querySelectorAll('#game-board .dot');
     const colors = new Set();
     dots.forEach((d) => colors.add(d.dataset.color));
@@ -1332,6 +1390,15 @@ function checkVictory() {
     const boardDots = document.querySelectorAll('#game-board .dot').length;
     const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter((el) => el.dataset.filled).length, 0);
     const tempDots = tempSlotsState.filter((d) => d).length;
+
+    if (activePlates.length === 0) {
+        resetBoxes();
+        initTempSlots();
+        showMessage('🏆 游戏胜利！');
+        disableGame();
+        return;
+    }
+
     if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
         showMessage('🏆 游戏胜利！');
         disableGame();
@@ -1454,6 +1521,7 @@ function startGame() {
     }
 
     TOTAL_SCREWS = TOTAL_BOXES * 3;
+    const screwColorPlan = planColorDistribution(TOTAL_BOXES, COLORS);
 
     board.innerHTML = '<svg id="line-layer"></svg>';
     lineLayer = document.getElementById('line-layer');
@@ -1471,8 +1539,8 @@ function startGame() {
     createGrid();
     activateCells();
     initTempSlots();
+    generateBoardData(screwColorPlan);
     initPools();
-    generateBoardData();
     initBoardState();
     for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
         spawnNextPlate();
@@ -1489,7 +1557,6 @@ function startGame() {
 
 const autoBtn = document.getElementById('auto-btn');
 const difficultyButtonsContainer = document.getElementById('difficulty-buttons');
-let selectedDifficulty = 5;
 
 function updateInputsWithDifficulty(difficulty) {
     const settings = DIFFICULTY_LEVELS.find((d) => d.level === difficulty);
