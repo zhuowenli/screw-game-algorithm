@@ -31,6 +31,10 @@ let COLOR_BOX_TOTALS = {};
 let colorPool = {};
 let boxPool = {};
 
+/**
+ * 初始化颜色池和盒子池
+ * 根据总螺丝数量分配各种颜色的螺丝数量
+ */
 function initPools() {
     COLOR_TOTALS = Array(TOTAL_SCREWS)
         .fill(0)
@@ -90,6 +94,10 @@ let isClickDot = false;
 // 控制板块与螺丝的层级，每层之间相差 10，方便调试
 let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
 
+/**
+ * 创建游戏网格
+ * 在游戏面板上创建行列格子
+ */
 function createGrid() {
     for (let row = 0; row < ROWS; row++) {
         cellMap[row] = [];
@@ -104,6 +112,10 @@ function createGrid() {
     }
 }
 
+/**
+ * 激活游戏格子
+ * 随机激活指定数量的格子作为可放置螺丝的区域
+ */
 function activateCells() {
     const allCells = [];
     for (let row = 0; row < ROWS; row++) {
@@ -126,7 +138,10 @@ function activateCells() {
     }
 }
 
-// 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
+/**
+ * 生成游戏面板数据
+ * 随机生成所有板块及其螺丝位置，每块板上随机 1-9 颗螺丝
+ */
 function generateBoardData() {
     boardData = [];
     let remaining = TOTAL_SCREWS;
@@ -180,6 +195,10 @@ function generateBoardData() {
     }
 }
 
+/**
+ * 初始化游戏面板状态
+ * 将生成的板块数据转换为游戏状态
+ */
 function initBoardState() {
     nextPlateZ = 1000;
     plates = boardData.map((p) => {
@@ -222,11 +241,19 @@ function initBoardState() {
     failedPlates = [];
 }
 
+/**
+ * 初始化临时槽位
+ * 创建指定数量的临时槽位用于存放螺丝
+ */
 function initTempSlots() {
     tempSlotsState = Array(MAX_TEMP_SLOTS).fill(null);
     renderTempSlots();
 }
 
+/**
+ * 渲染临时槽位
+ * 在页面上显示临时槽位及其内容
+ */
 function renderTempSlots() {
     tempSlotsContainer.innerHTML = '';
     for (let i = 0; i < MAX_TEMP_SLOTS; i++) {
@@ -241,6 +268,10 @@ function renderTempSlots() {
     tempSlots = document.querySelectorAll('.temp-slot');
 }
 
+/**
+ * 获取游戏面板信息
+ * 返回当前面板的层级和状态数据
+ */
 function getBoardInfo() {
     return {
         layers: JSON.parse(JSON.stringify(boardData)),
@@ -248,6 +279,10 @@ function getBoardInfo() {
     };
 }
 
+/**
+ * 设置游戏难度
+ * 根据参数调整临时槽位数量和颜色池
+ */
 function setDifficulty(opts) {
     if (opts.tempSlots !== undefined) {
         MAX_TEMP_SLOTS = opts.tempSlots;
@@ -270,6 +305,12 @@ function setDifficulty(opts) {
     updateInfo();
 }
 
+/**
+ * 在指定格子中生成螺丝点
+ * @param {Object} screw 螺丝对象
+ * @param {Element} cell 格子元素
+ * @returns {Element} 生成的螺丝点元素
+ */
 function spawnDot(screw, cell) {
     const dot = document.createElement('div');
     dot.className = 'dot';
@@ -283,6 +324,10 @@ function spawnDot(screw, cell) {
     return dot;
 }
 
+/**
+ * 移除螺丝点
+ * @param {Element} dot 要移除的螺丝点元素
+ */
 function removeDot(dot) {
     const color = dot.dataset.color;
     const cell = dot.parentElement;
@@ -301,7 +346,11 @@ function removeDot(dot) {
     if (cell) checkPlateRemoval(cell);
 }
 
-// 在场景中生成一个板块及其螺丝
+/**
+ * 在场景中生成一个板块及其螺丝
+ * @param {Object} plate 板块对象
+ * @returns {boolean} 是否成功生成板块
+ */
 function spawnPlate(plate) {
     const overlay = document.createElement('div');
     overlay.className = 'plate';
@@ -349,6 +398,10 @@ function spawnPlate(plate) {
     return true;
 }
 
+/**
+ * 移除板块
+ * @param {Object} plate 要移除的板块对象
+ */
 function removePlate(plate) {
     plate.overlay && plate.overlay.remove();
     for (const screw of plate.screws) {
@@ -367,7 +420,10 @@ function removePlate(plate) {
     updateInfo();
 }
 
-// 根据当前板块层级，控制螺丝的可点击状态
+/**
+ * 根据当前板块层级，控制螺丝的可点击状态
+ * 计算每个螺丝是否被上层板块遮挡
+ */
 function updateDotBlockStates() {
     const topMap = {};
     // 计算每个格子上方覆盖的最高板块
@@ -394,6 +450,10 @@ function updateDotBlockStates() {
     }
 }
 
+/**
+ * 清理孤立的锁定连接
+ * 移除无效的锁定关系，保持游戏状态一致性
+ */
 function cleanupOrphanLocks() {
     // Remove connections that reference missing screws or dots
     lockConnections = lockConnections.filter((conn) => {
@@ -489,6 +549,11 @@ function cleanupOrphanLocks() {
     updateDotBlockStates();
 }
 
+/**
+ * 获取螺丝点的中心坐标
+ * @param {Element} dot 螺丝点元素
+ * @returns {Object} 包含x,y坐标的对象
+ */
 function getDotCenter(dot) {
     const br = board.getBoundingClientRect();
     const dr = dot.getBoundingClientRect();
@@ -498,6 +563,12 @@ function getDotCenter(dot) {
     };
 }
 
+/**
+ * 在两个螺丝点之间绘制连线
+ * @param {Element} fromDot 起始螺丝点
+ * @param {Element} toDot 目标螺丝点
+ * @returns {Element} SVG线条元素
+ */
 function drawLine(fromDot, toDot) {
     const p1 = getDotCenter(fromDot);
     const p2 = getDotCenter(toDot);
@@ -511,6 +582,10 @@ function drawLine(fromDot, toDot) {
     return line;
 }
 
+/**
+ * 移除锁定连接
+ * @param {Object} conn 要移除的连接对象
+ */
 function removeConnection(conn) {
     conn.line && conn.line.remove();
     conn.locked.controllers = conn.locked.controllers.filter((c) => c !== conn.controller);
@@ -537,6 +612,12 @@ function removeConnection(conn) {
     if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
 }
 
+/**
+ * 应用锁定关系
+ * @param {Object} controller 控制螺丝
+ * @param {Object} locked 被锁定的螺丝
+ * @returns {boolean} 是否成功应用锁定
+ */
 function applyLock(controller, locked) {
     if (!locked.controllers.includes(controller)) locked.controllers.push(controller);
     controller.control = locked;
@@ -565,6 +646,12 @@ function applyLock(controller, locked) {
     return true;
 }
 
+/**
+ * 检查螺丝是否可以控制目标螺丝
+ * @param {Object} controller 控制螺丝
+ * @param {Object} target 目标螺丝
+ * @returns {boolean} 是否可以控制
+ */
 function canControl(controller, target) {
     if (controller.plateId !== target.plateId) return false;
     if (controller.control) return false;
@@ -579,6 +666,11 @@ function canControl(controller, target) {
     return true;
 }
 
+/**
+ * 获取螺丝的锁定深度
+ * @param {Object} screw 螺丝对象
+ * @returns {number} 锁定深度
+ */
 function getLockDepth(screw) {
     let depth = 1;
     let cur = screw.controller;
@@ -589,6 +681,11 @@ function getLockDepth(screw) {
     return depth;
 }
 
+/**
+ * 获取指定颜色螺丝的最大锁定深度
+ * @param {string} color 颜色
+ * @returns {number} 最大锁定深度
+ */
 function maxColorLockDepth(color) {
     let max = 0;
     for (const id in screwMap) {
@@ -600,6 +697,10 @@ function maxColorLockDepth(color) {
     return max;
 }
 
+/**
+ * 设置锁定关系
+ * @param {Array} newScrews 新螺丝数组（可选）
+ */
 function setupLocks(newScrews) {
     const free = tempSlotsState.filter((d) => d === null).length;
     const baseProb = Math.min(0.8, 0.2 + free * 0.1);
@@ -635,6 +736,10 @@ function setupLocks(newScrews) {
 
 let failedPlates = [];
 
+/**
+ * 生成下一个板块
+ * 根据当前可见板块数量限制生成新板块
+ */
 function spawnNextPlate() {
     if (activePlates.length >= MAX_VISIBLE_PLATES) return;
 
@@ -660,6 +765,10 @@ function spawnNextPlate() {
     }
 }
 
+/**
+ * 检查板块是否需要移除
+ * @param {Element} cell 格子元素
+ */
 function checkPlateRemoval(cell) {
     activePlates.forEach((plate) => {
         const dots = plate.screws.filter((s) => s.cell && s.cell.querySelector('.dot') && s.dot);
@@ -686,6 +795,11 @@ function checkPlateRemoval(cell) {
     });
 }
 
+/**
+ * 设置盒子
+ * @param {Element} box 盒子元素
+ * @param {boolean} isHint 是否为提示模式
+ */
 function setupBox(box, isHint = false) {
     const tempCounts = Object.fromEntries(COLORS.map((c) => [c, 0]));
     if (isHint) {
@@ -741,6 +855,11 @@ function setupBox(box, isHint = false) {
     updateInfo();
 }
 
+/**
+ * 吸收临时槽位中的匹配螺丝
+ * @param {string} color 颜色
+ * @param {Element} box 盒子元素
+ */
 function absorbTempDots(color, box) {
     const matchingDots = [];
     tempSlotsState.forEach((d) => {
@@ -780,10 +899,18 @@ function absorbTempDots(color, box) {
     }
 }
 
+/**
+ * 计算剩余颜色池总数
+ * @returns {number} 剩余螺丝总数
+ */
 function totalRemainingPool() {
     return COLORS.reduce((s, c) => s + colorPool[c], 0);
 }
 
+/**
+ * 统计游戏面板上各颜色螺丝数量
+ * @returns {Object} 各颜色的数量统计
+ */
 function countBoardColors() {
     const counts = Object.fromEntries(COLORS.map((c) => [c, 0]));
     for (const plate of activePlates) {
@@ -794,6 +921,10 @@ function countBoardColors() {
     return counts;
 }
 
+/**
+ * 统计场景中各颜色螺丝总数（包括面板、临时槽和盒子）
+ * @returns {Object} 各颜色的总数统计
+ */
 function countSceneColors() {
     const counts = countBoardColors();
     tempSlotsState.forEach((d) => {
@@ -809,6 +940,12 @@ function countSceneColors() {
     return counts;
 }
 
+/**
+ * 根据权重随机选择颜色
+ * @param {Array} colors 颜色数组
+ * @param {Object} weights 权重对象
+ * @returns {string} 选中的颜色
+ */
 function weightedRandom(colors, weights) {
     const total = colors.reduce((s, c) => s + weights[c], 0);
     let r = Math.random() * total;
@@ -819,6 +956,10 @@ function weightedRandom(colors, weights) {
     return colors[colors.length - 1];
 }
 
+/**
+ * 检查是否点击了螺丝点
+ * 设置点击状态标记
+ */
 function checkClickDot() {
     isClickDot = true;
     setTimeout(() => {
@@ -826,6 +967,10 @@ function checkClickDot() {
     }, 1000);
 }
 
+/**
+ * 处理螺丝点击事件
+ * @param {Element} dot 被点击的螺丝点元素
+ */
 function handleDotClick(dot) {
     if (dot.dataset.blocked === 'true') return;
     const color = dot.dataset.color;
@@ -893,6 +1038,10 @@ function handleDotClick(dot) {
     disableGame();
 }
 
+/**
+ * 重置所有盒子状态
+ * 恢复盒子到初始状态
+ */
 function resetBoxes() {
     boxes.forEach((box, i) => {
         const enabled = initialBoxStates[i];
@@ -904,6 +1053,10 @@ function resetBoxes() {
     boxes = document.querySelectorAll('.box');
 }
 
+/**
+ * 初始化所有盒子
+ * 设置盒子的初始状态和事件监听器
+ */
 function initBoxes() {
     usedBoxColors.clear();
     boxes.forEach((box, i) => {
@@ -924,6 +1077,10 @@ function initBoxes() {
     });
 }
 
+/**
+ * 检查临时槽位限制
+ * 当临时槽位满时游戏失败
+ */
 function checkTempSlotLimit() {
     if (isClickDot) return;
     setTimeout(() => {
@@ -937,10 +1094,19 @@ function checkTempSlotLimit() {
     }, 1000);
 }
 
+/**
+ * 显示消息
+ * @param {string} msg 要显示的消息
+ */
 function showMessage(msg) {
     message.textContent = msg;
 }
 
+/**
+ * 评估指定颜色的难度
+ * @param {string} color 颜色
+ * @returns {number} 难度级别（1-3）
+ */
 function evaluateDifficultyForColor(color) {
     const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
     const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
@@ -963,6 +1129,10 @@ function evaluateDifficultyForColor(color) {
     return 3; // 困难
 }
 
+/**
+ * 评估整体难度
+ * @returns {number} 整体难度级别
+ */
 function evaluateOverallDifficulty() {
     let minLevel = 3;
     boxes.forEach((box) => {
@@ -974,6 +1144,10 @@ function evaluateOverallDifficulty() {
     return minLevel;
 }
 
+/**
+ * 绘制难度图表
+ * 在画布上绘制难度变化趋势
+ */
 function drawDifficultyChart() {
     if (!difficultyCtx) return;
     const w = difficultyCanvas.width;
@@ -1017,6 +1191,10 @@ function drawDifficultyChart() {
     });
 }
 
+/**
+ * 记录难度
+ * @param {number} level 难度级别
+ */
 function recordDifficulty(level) {
     difficultyHistory.push(level);
     drawDifficultyChart();
