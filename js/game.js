@@ -73,6 +73,9 @@ const queueCountEl = document.getElementById('queue-count');
 const colorCountEl = document.getElementById('color-count');
 const colorStats = document.getElementById('color-stats');
 const addTempSlotBtn = document.getElementById('add-temp-slot');
+const difficultyCanvas = document.getElementById('difficulty-canvas');
+let difficultyCtx = difficultyCanvas.getContext('2d');
+let difficultyHistory = [];
 
 const cellMap = [];
 let activeCells = [];
@@ -728,6 +731,9 @@ function setupBox(box, isHint = false) {
         box.appendChild(slot);
     }
 
+    const level = evaluateDifficulty(color);
+    recordDifficulty(level);
+
     absorbTempDots(color, box);
     updateInfo();
 }
@@ -932,6 +938,55 @@ function showMessage(msg) {
     message.textContent = msg;
 }
 
+function evaluateDifficulty(color) {
+    const dots = [...document.querySelectorAll('#game-board .dot')].filter(
+        (d) => d.dataset.color === color
+    );
+    const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
+    if (accessible >= 3) return 1; // 简单
+    if (dots.length >= 3) return 2; // 中等
+    return 3; // 困难
+}
+
+function drawDifficultyChart() {
+    if (!difficultyCtx) return;
+    const w = difficultyCanvas.width;
+    const h = difficultyCanvas.height;
+    difficultyCtx.clearRect(0, 0, w, h);
+    difficultyCtx.strokeStyle = '#000';
+    difficultyCtx.beginPath();
+    difficultyCtx.moveTo(30, 10);
+    difficultyCtx.lineTo(30, h - 20);
+    difficultyCtx.lineTo(w - 10, h - 20);
+    difficultyCtx.stroke();
+
+    if (difficultyHistory.length === 0) return;
+    const step =
+        (w - 40) / Math.max(1, difficultyHistory.length - 1);
+    difficultyCtx.strokeStyle = '#f00';
+    difficultyCtx.beginPath();
+    difficultyHistory.forEach((lvl, idx) => {
+        const x = 30 + idx * step;
+        const y = h - 20 - (lvl - 1) * ((h - 40) / 2);
+        if (idx === 0) difficultyCtx.moveTo(x, y);
+        else difficultyCtx.lineTo(x, y);
+    });
+    difficultyCtx.stroke();
+    difficultyCtx.fillStyle = '#f00';
+    difficultyHistory.forEach((lvl, idx) => {
+        const x = 30 + idx * step;
+        const y = h - 20 - (lvl - 1) * ((h - 40) / 2);
+        difficultyCtx.beginPath();
+        difficultyCtx.arc(x, y, 3, 0, Math.PI * 2);
+        difficultyCtx.fill();
+    });
+}
+
+function recordDifficulty(level) {
+    difficultyHistory.push(level);
+    drawDifficultyChart();
+}
+
 function updateInfo() {
     totalCountEl.textContent = TOTAL_SCREWS;
     const queue = totalRemainingPool();
@@ -1107,6 +1162,8 @@ function startGame() {
         spawnNextPlate();
     }
     resetBoxes();
+    difficultyHistory = [];
+    drawDifficultyChart();
     initBoxes();
     setupLocks();
     updateInfo();

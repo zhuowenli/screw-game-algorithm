@@ -212,6 +212,14 @@
             font-size: 1.2em;
             color: red;
         }
+
+        #difficulty-panel {
+            margin-top: 30px;
+        }
+        #difficulty-panel canvas {
+            background: #fff;
+            border: 1px solid #ccc;
+        }
     </style>
 </head>
 
@@ -262,6 +270,11 @@
     <div id="game-board"><svg id="line-layer"></svg></div>
 
     <div id="message"></div>
+
+    <div id="difficulty-panel">
+        <h2>难度信息</h2>
+        <canvas id="difficulty-canvas" width="600" height="200"></canvas>
+    </div>
 
     <script src='js/game.js'></script>
 </body>
