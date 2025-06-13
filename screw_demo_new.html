@@ -911,7 +911,7 @@
             });
         }
 
-        function setupBox(box) {
+        function setupBox(box, isHint = false) {
             const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
             tempSlotsState.forEach(d => {
                 if (d) tempCounts[d.dataset.color]++;
@@ -1138,7 +1138,7 @@
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
                     box.addEventListener("click", () => {
-                        setupBox(box);
+                        setupBox(box, true);
                         box.querySelector(".hint") && box.querySelector(".hint").remove();
                     });
                 }
