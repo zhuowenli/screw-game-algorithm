@@ -15,16 +15,36 @@ let COLORS = ALL_COLORS.slice(0, 7);
 const ROWS = 30;
 const COLS = 20;
 const MAX_ACTIVATED_CELLS = 200;
-const AUTO_PLAY_INTERVAL = 250; // 自动点击间隔
+const AUTO_PLAY_INTERVAL = 100; // 自动点击间隔
 let TOTAL_BOXES = 50;
 let TOTAL_SCREWS = TOTAL_BOXES * 3;
-const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
+let MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
 const MAX_CHAIN_LENGTH = 5; // 1对1连线最大节点数(5=4条线)
-const MAX_LOCK_GROUPS = 4; // 同时最多锁定组数
-const MAX_CONTROLLERS_PER_LOCK = 3; // 单个锁最多控制螺丝数量
+let MAX_LOCK_GROUPS = 4; // 同时最多锁定组数
+let MAX_CONTROLLERS_PER_LOCK = 3; // 单个锁最多控制螺丝数量
 let MAX_TEMP_SLOTS = 5;
 // 记录最近一次拔出螺丝的格子
 let lastRemovedCell = null;
+
+const DIFFICULTY_LEVELS = [];
+const NUM_DIFFICULTY_LEVELS = 50;
+
+function interpolate(start, end, steps, step) {
+    return Math.round(start + (end - start) * (step / (steps - 1)));
+}
+
+for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
+    const level = i + 1;
+    DIFFICULTY_LEVELS.push({
+        level: level,
+        colors: interpolate(5, 10, NUM_DIFFICULTY_LEVELS, i),
+        boxes: interpolate(30, 80, NUM_DIFFICULTY_LEVELS, i),
+        tempSlots: 5,
+        maxLockGroups: interpolate(2, 7, NUM_DIFFICULTY_LEVELS, i),
+        maxControllers: interpolate(1, 5, NUM_DIFFICULTY_LEVELS, i),
+        maxVisiblePlates: interpolate(3, 6, NUM_DIFFICULTY_LEVELS, i),
+    });
+}
 
 let COLOR_TOTALS = {};
 let COLOR_BOX_TOTALS = {};
@@ -698,11 +718,49 @@ function maxColorLockDepth(color) {
 }
 
 /**
+ * 获取当前游戏进度
+ * @returns {number} 游戏进度 (0-1)
+ */
+function getProgress() {
+    const eliminated = parseInt(eliminatedCountEl.textContent || '0');
+    return TOTAL_SCREWS > 0 ? eliminated / TOTAL_SCREWS : 0;
+}
+
+/**
+ * 根据游戏进度获取难度调整参数
+ * @returns {Object} 难度调整参数
+ */
+function getStageModifiers() {
+    const progress = getProgress();
+
+    if (progress < 0.3) {
+        // 阶段1: 正常
+        return { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0, hint: '' };
+    }
+    if (progress < 0.5) {
+        // 阶段2: 紧张
+        return { lockProbFactor: 1.5, connectionMultiplier: 1.2, extraConnections: 0, hint: '' };
+    }
+    if (progress < 0.7) {
+        // 阶段3: 危险
+        return { lockProbFactor: 2.0, connectionMultiplier: 1.5, extraConnections: 1 + Math.floor(Math.random() * 2), hint: '' };
+    }
+    // 阶段4: 付费引导
+    return {
+        lockProbFactor: 2.5,
+        connectionMultiplier: 1.5,
+        extraConnections: 1 + Math.floor(Math.random() * 2),
+        hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
+    };
+}
+
+/**
  * 设置锁定关系
  * @param {Array} newScrews 新螺丝数组（可选）
  */
 function setupLocks(newScrews) {
     const free = tempSlotsState.filter((d) => d === null).length;
+    const { lockProbFactor, connectionMultiplier, extraConnections } = getStageModifiers();
     const baseProb = Math.min(0.8, 0.2 + free * 0.1);
     const platesToCheck = newScrews ? [...new Set(newScrews.map((s) => activePlates.find((p) => p.id === s.plateId)))] : activePlates;
     let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
@@ -712,7 +770,12 @@ function setupLocks(newScrews) {
         for (const locked of candidates) {
             if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
             const requiredDepth = maxColorLockDepth(locked.color);
-            if (requiredDepth === 0 && Math.random() > baseProb) continue;
+
+            if (requiredDepth === 0) {
+                const finalProb = Math.min(baseProb * lockProbFactor, 0.95); // 锁定概率最高95%
+                if (Math.random() > finalProb) continue;
+            }
+
             let controllers = all.filter((c) => c !== locked && canControl(c, locked));
             if (controllers.length === 0) continue;
             controllers.sort((a, b) => {
@@ -723,7 +786,11 @@ function setupLocks(newScrews) {
             controllers = controllers.filter((c) => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
             if (controllers.length === 0) continue;
             const limit = Math.min(getLockControllerLimit(), controllers.length);
-            const count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+            let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+            count = Math.round(count * connectionMultiplier);
+            count += extraConnections;
+            count = Math.min(count, controllers.length);
+
             for (let i = 0; i < count; i++) {
                 applyLock(controllers[i], locked);
             }
@@ -1201,6 +1268,9 @@ function recordDifficulty(level) {
     if (currentDifficultyEl) currentDifficultyEl.textContent = DIFFICULTY_NAMES[level - 1];
 }
 
+/**
+ * 更新游戏信息面板
+ */
 function updateInfo() {
     totalCountEl.textContent = TOTAL_SCREWS;
     const queue = totalRemainingPool();
@@ -1226,22 +1296,32 @@ function updateInfo() {
     }).join('');
 }
 
+/**
+ * 获取当前锁定组数限制
+ * @returns {number} 限制数量
+ */
 function getLockGroupLimit() {
-    const eliminated = parseInt(eliminatedCountEl.textContent || '0');
-    const progress = eliminated / TOTAL_SCREWS;
-    if (progress < 0.33) return 2;
-    if (progress < 0.66) return 3;
+    const progress = getProgress();
+    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 2);
+    if (progress < 0.7) return Math.min(MAX_LOCK_GROUPS, 3);
     return MAX_LOCK_GROUPS;
 }
 
+/**
+ * 获取单个锁的控制器数量限制
+ * @returns {number} 限制数量
+ */
 function getLockControllerLimit() {
-    const eliminated = parseInt(eliminatedCountEl.textContent || '0');
-    const progress = eliminated / TOTAL_SCREWS;
-    if (progress < 0.33) return 1;
-    if (progress < 0.66) return 2;
+    const progress = getProgress();
+    if (progress < 0.3) return 1;
+    if (progress < 0.7) return Math.min(MAX_CONTROLLERS_PER_LOCK, 2);
     return MAX_CONTROLLERS_PER_LOCK;
 }
 
+/**
+ * 禁用游戏
+ * 游戏结束时调用
+ */
 function disableGame() {
     document.querySelectorAll('.dot').forEach((d) => (d.style.pointerEvents = 'none'));
     boxes.forEach((b) => (b.style.pointerEvents = 'none'));
@@ -1346,12 +1426,33 @@ function stopAutoPlay() {
     autoBtn.textContent = '自动玩';
 }
 
+/**
+ * 开始游戏
+ * 初始化游戏状态并开始新一局游戏
+ */
 function startGame() {
     stopAutoPlay();
-    TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
-    const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
-    MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
-    COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
+    const settings = DIFFICULTY_LEVELS.find((d) => d.level === selectedDifficulty);
+
+    if (settings) {
+        document.getElementById('box-count').value = settings.boxes;
+        document.getElementById('color-count-input').value = settings.colors;
+        document.getElementById('temp-count').value = settings.tempSlots;
+
+        // Apply settings
+        TOTAL_BOXES = settings.boxes;
+        COLORS = ALL_COLORS.slice(0, Math.min(settings.colors, ALL_COLORS.length));
+        MAX_TEMP_SLOTS = settings.tempSlots;
+        MAX_LOCK_GROUPS = settings.maxLockGroups;
+        MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
+        MAX_VISIBLE_PLATES = settings.maxVisiblePlates;
+    } else {
+        TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
+        const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
+        MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
+        COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
+    }
+
     TOTAL_SCREWS = TOTAL_BOXES * 3;
 
     board.innerHTML = '<svg id="line-layer"></svg>';
@@ -1387,6 +1488,42 @@ function startGame() {
 }
 
 const autoBtn = document.getElementById('auto-btn');
+const difficultyButtonsContainer = document.getElementById('difficulty-buttons');
+let selectedDifficulty = 5;
+
+function updateInputsWithDifficulty(difficulty) {
+    const settings = DIFFICULTY_LEVELS.find((d) => d.level === difficulty);
+    if (settings) {
+        document.getElementById('box-count').value = settings.boxes;
+        document.getElementById('color-count-input').value = settings.colors;
+        document.getElementById('temp-count').value = settings.tempSlots;
+    }
+}
+
+function createDifficultyButtons() {
+    difficultyButtonsContainer.innerHTML = '';
+    for (const difficulty of DIFFICULTY_LEVELS) {
+        const button = document.createElement('button');
+        button.className = 'difficulty-btn';
+        button.textContent = difficulty.level;
+        button.dataset.level = difficulty.level;
+
+        if (difficulty.level === selectedDifficulty) {
+            button.classList.add('selected');
+        }
+
+        button.addEventListener('click', () => {
+            selectedDifficulty = difficulty.level;
+
+            const allButtons = difficultyButtonsContainer.querySelectorAll('.difficulty-btn');
+            allButtons.forEach((btn) => btn.classList.remove('selected'));
+            button.classList.add('selected');
+
+            updateInputsWithDifficulty(selectedDifficulty);
+        });
+        difficultyButtonsContainer.appendChild(button);
+    }
+}
 
 document.getElementById('start-btn').addEventListener('click', () => {
     stopAutoPlay();
@@ -1409,4 +1546,6 @@ addTempSlotBtn.addEventListener('click', () => {
     renderTempSlots();
     updateInfo();
 });
+createDifficultyButtons();
+updateInputsWithDifficulty(selectedDifficulty);
 startGame();

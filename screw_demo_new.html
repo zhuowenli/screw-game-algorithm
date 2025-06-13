@@ -225,6 +225,30 @@
             background: #fff;
             border: 1px solid #ccc;
         }
+
+        #difficulty-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .difficulty-btn {
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            background: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        .difficulty-btn.selected {
+            background: #007bff;
+            color: #fff;
+            border-color: #007bff;
+        }
     </style>
 </head>
 
@@ -241,6 +265,10 @@
         <div>
             <label>临时孔位数量:<input id="temp-count" type="number" value="5" min="1"></label>
         </div>
+        <div>
+            <label>难度选择:</label>
+            <div id="difficulty-buttons"></div>
+        </div>
         <button id="start-btn">开始游戏</button>
         <button id="reset-btn">重置游戏</button>
         <button id="auto-btn">自动玩</button>
@@ -250,10 +278,10 @@
         <div class="box" data-enabled="true"></div>
         <div class="box" data-enabled="true"></div>
         <div class="box" data-enabled="false">
-            <div class="hint">点击开启</div>
+            <div class="hint">点击解锁</div>
         </div>
         <div class="box" data-enabled="false">
-            <div class="hint">点击开启</div>
+            <div class="hint">点击解锁</div>
         </div>
     </div>
 
