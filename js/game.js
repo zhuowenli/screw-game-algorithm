@@ -67,6 +67,7 @@ const initialBoxStates = Array.from(boxes).map((b) => b.dataset.enabled === 'tru
 const message = document.getElementById('message');
 const totalCountEl = document.getElementById('total-count');
 const eliminatedCountEl = document.getElementById('eliminated-count');
+const progressCountEl = document.getElementById('progress-count');
 const remainingCountEl = document.getElementById('remaining-count');
 const onboardCountEl = document.getElementById('onboard-count');
 const queueCountEl = document.getElementById('queue-count');
@@ -941,9 +942,7 @@ function showMessage(msg) {
 }
 
 function evaluateDifficultyForColor(color) {
-    const dots = [...document.querySelectorAll('#game-board .dot')].filter(
-        (d) => d.dataset.color === color
-    );
+    const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
     const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
     const blocked = dots.length - accessible;
 
@@ -954,9 +953,7 @@ function evaluateDifficultyForColor(color) {
         });
     });
 
-    const inTemps = tempSlotsState.filter(
-        (d) => d && d.dataset.color === color
-    ).length;
+    const inTemps = tempSlotsState.filter((d) => d && d.dataset.color === color).length;
 
     const accessibleTotal = accessible + inBoxes + inTemps;
     const availableTotal = accessibleTotal + blocked;
@@ -1000,8 +997,7 @@ function drawDifficultyChart() {
     difficultyCtx.fillText('低', left - 5, bottom + 5);
 
     if (difficultyHistory.length === 0) return;
-    const step =
-        (w - left - 10) / Math.max(1, difficultyHistory.length - 1);
+    const step = (w - left - 10) / Math.max(1, difficultyHistory.length - 1);
     difficultyCtx.strokeStyle = '#f00';
     difficultyCtx.beginPath();
     difficultyHistory.forEach((lvl, idx) => {
@@ -1038,6 +1034,7 @@ function updateInfo() {
     const eliminated = TOTAL_SCREWS - remaining;
     remainingCountEl.textContent = remaining;
     eliminatedCountEl.textContent = eliminated;
+    progressCountEl.textContent = ((eliminated / TOTAL_SCREWS) * 100).toFixed(2) + '%';
     onboardCountEl.textContent = onBoard;
     queueCountEl.textContent = queue;
     const dots = document.querySelectorAll('#game-board .dot');
