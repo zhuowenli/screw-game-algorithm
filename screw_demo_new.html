@@ -285,6 +285,8 @@
         let TOTAL_BOXES = 50;
         let TOTAL_SCREWS = TOTAL_BOXES * 3;
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
+        const MAX_CHAIN_LENGTH = 5; // 1对1连线最大节点数(5=4条线)
+        const MAX_LOCK_GROUPS = 4; // 同时最多锁定组数
         let MAX_TEMP_SLOTS = 5;
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
@@ -460,7 +462,8 @@
                         dot: null,
                         locked: false,
                         controller: null,
-                        controls: null,
+                        control: null,
+                        controllers: [],
                         overlay: null,
                         plateId: p.id
                     })),
@@ -668,7 +671,8 @@
                     }
                     conn.locked.locked = false;
                     conn.locked.controller = null;
-                    conn.controller.controls = null;
+                    conn.locked.controllers = conn.locked.controllers.filter(c => c !== conn.controller);
+                    conn.controller.control = null;
                     if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
                     if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
                 }
@@ -694,9 +698,22 @@
                     conn.locked.dot.dataset.blocked = 'false';
                     conn.locked.dot.classList.remove('blocked');
                 }
-                conn.locked.locked = false;
-                conn.locked.controller = null;
-                conn.controller.controls = null;
+                conn.locked.controllers = conn.locked.controllers.filter(c => c !== conn.controller);
+                if (conn.locked.controllers.length === 0) {
+                    conn.locked.locked = false;
+                    conn.locked.controller = null;
+                    if (conn.locked.dot) {
+                        conn.locked.dot.dataset.blocked = 'false';
+                        conn.locked.dot.classList.remove('blocked');
+                    }
+                    if (conn.locked.overlay) {
+                        conn.locked.overlay.remove();
+                        conn.locked.overlay = null;
+                    }
+                } else if (conn.locked.controller === conn.controller) {
+                    conn.locked.controller = conn.locked.controllers[0];
+                }
+                conn.controller.control = null;
                 if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
                 if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
             }
@@ -716,6 +733,7 @@
                 if (s.locked && !connectedLocked.has(s.id) && !connectedControllers.has(s.id)) {
                     s.locked = false;
                     s.controller = null;
+                    s.controllers = [];
                     if (s.overlay) {
                         s.overlay.remove();
                         s.overlay = null;
@@ -725,8 +743,8 @@
                         s.dot.classList.remove('blocked');
                     }
                 }
-                if (s.controls && !connectedControllers.has(s.id)) {
-                    s.controls = null;
+                if (s.control && !connectedControllers.has(s.id)) {
+                    s.control = null;
                 }
             }
             updateDotBlockStates();
@@ -756,17 +774,24 @@
 
         function removeConnection(conn) {
             conn.line && conn.line.remove();
-            if (conn.locked.overlay) {
-                conn.locked.overlay.remove();
-                conn.locked.overlay = null;
+            conn.locked.controllers = conn.locked.controllers.filter(c => c !== conn.controller);
+            if (conn.locked.controllers.length === 0) {
+                if (conn.locked.overlay) {
+                    conn.locked.overlay.remove();
+                    conn.locked.overlay = null;
+                }
+                if (conn.locked.dot) {
+                    conn.locked.dot.dataset.blocked = 'false';
+                    conn.locked.dot.classList.remove('blocked');
+                }
+                conn.locked.locked = false;
+                conn.locked.controller = null;
+            } else {
+                if (conn.locked.controller === conn.controller) {
+                    conn.locked.controller = conn.locked.controllers[0];
+                }
             }
-            if (conn.locked.dot) {
-                conn.locked.dot.dataset.blocked = 'false';
-                conn.locked.dot.classList.remove('blocked');
-            }
-            conn.locked.locked = false;
-            conn.locked.controller = null;
-            conn.controller.controls = null;
+            conn.controller.control = null;
             lockConnections = lockConnections.filter(c => c !== conn);
             cleanupOrphanLocks();
             if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
@@ -774,8 +799,9 @@
         }
 
         function applyLock(controller, locked) {
-            controller.controls = locked;
-            locked.controller = controller;
+            if (!locked.controllers.includes(controller)) locked.controllers.push(controller);
+            controller.control = locked;
+            if (!locked.controller) locked.controller = controller;
             locked.locked = true;
             if (locked.dot) {
                 locked.dot.dataset.blocked = 'true';
@@ -795,18 +821,19 @@
                 });
             }
             cleanupOrphanLocks();
+            return true;
         }
 
         function canControl(controller, target) {
             if (controller.plateId !== target.plateId) return false;
-            if (controller.controls || target.controller) return false;
+            if (controller.control) return false;
             let c = controller;
             let depth = 1;
             while (c) {
                 if (c === target) return false;
                 c = c.controller;
                 depth++;
-                if (depth > 3) return false;
+                if (depth > MAX_CHAIN_LENGTH) return false;
             }
             return true;
         }
@@ -837,11 +864,12 @@
             const baseProb = Math.min(0.8, 0.2 + free * 0.1);
             const platesToCheck = newScrews ? [...new Set(newScrews.map(s => activePlates.find(p => p.id === s
                 .plateId)))] : activePlates;
+            let currentGroups = new Set(lockConnections.map(c => c.locked.id));
             for (const plate of platesToCheck) {
                 const all = plate.screws;
-                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && !s.controller && !s
-                    .controls);
+                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && s.controllers.length === 0);
                 for (const locked of candidates) {
+                    if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
                     const requiredDepth = maxColorLockDepth(locked.color);
                     if (requiredDepth === 0 && Math.random() > baseProb) continue;
                     const controllers = all.filter(c => c !== locked && canControl(c, locked));
@@ -852,9 +880,12 @@
                         return da - db;
                     });
                     let controller = controllers.find(c => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
-                    // if (!controller) controller = controllers[0];
-                    controller && applyLock(controller, locked);
+                    if (controller && applyLock(controller, locked)) {
+                        currentGroups.add(locked.id);
+                        if (currentGroups.size >= getLockGroupLimit()) break;
+                    }
                 }
+                if (currentGroups.size >= getLockGroupLimit()) break;
             }
         }
 
@@ -898,6 +929,7 @@
                         const s = locked[0];
                         s.locked = false;
                         s.controller = null;
+                        s.controllers = [];
                         if (s.overlay) {
                             s.overlay.remove();
                             s.overlay = null;
@@ -1184,6 +1216,14 @@
                 const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
                 return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
             }).join("");
+        }
+
+        function getLockGroupLimit() {
+            const eliminated = parseInt(eliminatedCountEl.textContent || '0');
+            const progress = eliminated / TOTAL_SCREWS;
+            if (progress < 0.33) return 2;
+            if (progress < 0.66) return 3;
+            return MAX_LOCK_GROUPS;
         }
 
         function disableGame() {
