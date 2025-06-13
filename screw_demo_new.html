@@ -806,21 +806,54 @@
                 if (c === target) return false;
                 c = c.controller;
                 depth++;
-                if (depth > 4) return false;
+                if (depth > 3) return false;
             }
             return true;
         }
 
-        function setupLocks() {
-            for (const plate of activePlates) {
+        function getLockDepth(screw) {
+            let depth = 1;
+            let cur = screw.controller;
+            while (cur) {
+                depth++;
+                cur = cur.controller;
+            }
+            return depth;
+        }
+
+        function maxColorLockDepth(color) {
+            let max = 0;
+            for (const id in screwMap) {
+                const s = screwMap[id];
+                if (s.locked && s.color === color) {
+                    max = Math.max(max, getLockDepth(s));
+                }
+            }
+            return max;
+        }
+
+        function setupLocks(newScrews) {
+            const free = tempSlotsState.filter(d => d === null).length;
+            const baseProb = Math.min(0.8, 0.2 + free * 0.1);
+            const platesToCheck = newScrews ? [...new Set(newScrews.map(s => activePlates.find(p => p.id === s
+                .plateId)))] : activePlates;
+            for (const plate of platesToCheck) {
                 const all = plate.screws;
-                const candidates = all.filter(s => !s.controller && !s.controls);
+                const candidates = (newScrews ? newScrews : all).filter(s => all.includes(s) && !s.controller && !s
+                    .controls);
                 for (const locked of candidates) {
-                    if (Math.random() > 0.2) continue;
+                    const requiredDepth = maxColorLockDepth(locked.color);
+                    if (requiredDepth === 0 && Math.random() > baseProb) continue;
                     const controllers = all.filter(c => c !== locked && canControl(c, locked));
                     if (controllers.length === 0) continue;
-                    const controller = controllers[Math.floor(Math.random() * controllers.length)];
-                    applyLock(controller, locked);
+                    controllers.sort((a, b) => {
+                        const da = Math.abs(a.row - locked.row) + Math.abs(a.col - locked.col);
+                        const db = Math.abs(b.row - locked.row) + Math.abs(b.col - locked.col);
+                        return da - db;
+                    });
+                    let controller = controllers.find(c => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
+                    // if (!controller) controller = controllers[0];
+                    controller && applyLock(controller, locked);
                 }
             }
         }
@@ -835,7 +868,7 @@
                 .length) {
                 const plate = failedPlates.shift();
                 if (spawnPlate(plate)) {
-                    setupLocks();
+                    setupLocks(plate.screws);
                 } else {
                     failedPlates.push(plate);
                 }
@@ -845,7 +878,7 @@
             while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
                 const next = plates[nextPlateIndex++];
                 if (spawnPlate(next)) {
-                    setupLocks();
+                    setupLocks(next.screws);
                 } else {
                     failedPlates.push(next);
                 }
@@ -878,18 +911,29 @@
             });
         }
 
-        function setupBox(box) {
-            const sceneCounts = countSceneColors();
+        function setupBox(box, isHint = false) {
+            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            tempSlotsState.forEach(d => {
+                if (d) tempCounts[d.dataset.color]++;
+            });
+            const boardCounts = countBoardColors();
 
-            const candidateColors = COLORS.filter(c =>
-                boxPool[c] > 0 && (colorPool[c] > 0 || sceneCounts[c] > 0)
-            );
-            let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
-            if (availableColors.length === 0) {
-                availableColors = candidateColors;
+            let candidateColors = COLORS.filter(c => boxPool[c] > 0 && tempCounts[c] > 0);
+            let weights = {};
+            if (candidateColors.length > 0) {
+                let available = candidateColors.filter(c => !usedBoxColors.has(c));
+                if (available.length === 0) available = candidateColors;
+                candidateColors = available;
+                weights = Object.fromEntries(candidateColors.map(c => [c, Math.pow(tempCounts[c], 2)]));
+            } else {
+                candidateColors = COLORS.filter(c => boxPool[c] > 0 && boardCounts[c] > 0);
+                let available = candidateColors.filter(c => !usedBoxColors.has(c));
+                if (available.length === 0) available = candidateColors;
+                candidateColors = available;
+                weights = Object.fromEntries(candidateColors.map(c => [c, Math.pow(boardCounts[c] + 1, 2)]));
             }
 
-            if (availableColors.length === 0) {
+            if (candidateColors.length === 0) {
                 box.dataset.enabled = "false";
                 box.classList.remove("enabled");
                 box.style.borderColor = "#ccc";
@@ -897,10 +941,7 @@
                 return;
             }
 
-            const weights = Object.fromEntries(
-                availableColors.map(c => [c, Math.pow(sceneCounts[c] + 1, 2)])
-            );
-            const color = weightedRandom(availableColors, weights);
+            const color = weightedRandom(candidateColors, weights);
             boxPool[color]--;
 
             box.dataset.color = color;
@@ -1097,7 +1138,7 @@
                     box.appendChild(hint);
                     box.style.borderColor = "#ccc";
                     box.addEventListener("click", () => {
-                        setupBox(box);
+                        setupBox(box, true);
                         box.querySelector(".hint") && box.querySelector(".hint").remove();
                     });
                 }
