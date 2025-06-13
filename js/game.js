@@ -76,6 +76,8 @@ const addTempSlotBtn = document.getElementById('add-temp-slot');
 const difficultyCanvas = document.getElementById('difficulty-canvas');
 let difficultyCtx = difficultyCanvas.getContext('2d');
 let difficultyHistory = [];
+const currentDifficultyEl = document.getElementById('current-difficulty');
+const DIFFICULTY_NAMES = ['低', '中', '高'];
 
 const cellMap = [];
 let activeCells = [];
@@ -731,7 +733,7 @@ function setupBox(box, isHint = false) {
         box.appendChild(slot);
     }
 
-    const level = evaluateDifficulty(color);
+    const level = evaluateOverallDifficulty();
     recordDifficulty(level);
 
     absorbTempDots(color, box);
@@ -938,7 +940,7 @@ function showMessage(msg) {
     message.textContent = msg;
 }
 
-function evaluateDifficulty(color) {
+function evaluateDifficultyForColor(color) {
     const dots = [...document.querySelectorAll('#game-board .dot')].filter(
         (d) => d.dataset.color === color
     );
@@ -964,6 +966,17 @@ function evaluateDifficulty(color) {
     return 3; // 困难
 }
 
+function evaluateOverallDifficulty() {
+    let minLevel = 3;
+    boxes.forEach((box) => {
+        if (box.dataset.enabled === 'true') {
+            const lvl = evaluateDifficultyForColor(box.dataset.color);
+            if (lvl < minLevel) minLevel = lvl;
+        }
+    });
+    return minLevel;
+}
+
 function drawDifficultyChart() {
     if (!difficultyCtx) return;
     const w = difficultyCanvas.width;
@@ -971,27 +984,37 @@ function drawDifficultyChart() {
     difficultyCtx.clearRect(0, 0, w, h);
     difficultyCtx.strokeStyle = '#000';
     difficultyCtx.beginPath();
-    difficultyCtx.moveTo(30, 10);
-    difficultyCtx.lineTo(30, h - 20);
-    difficultyCtx.lineTo(w - 10, h - 20);
+    const left = 40;
+    const top = 20;
+    const bottom = h - 30;
+    difficultyCtx.moveTo(left, top);
+    difficultyCtx.lineTo(left, bottom);
+    difficultyCtx.lineTo(w - 10, bottom);
     difficultyCtx.stroke();
+
+    difficultyCtx.font = '14px sans-serif';
+    difficultyCtx.fillStyle = '#000';
+    difficultyCtx.textAlign = 'right';
+    difficultyCtx.fillText('高', left - 5, top + 5);
+    difficultyCtx.fillText('中', left - 5, top + (bottom - top) / 2 + 5);
+    difficultyCtx.fillText('低', left - 5, bottom + 5);
 
     if (difficultyHistory.length === 0) return;
     const step =
-        (w - 40) / Math.max(1, difficultyHistory.length - 1);
+        (w - left - 10) / Math.max(1, difficultyHistory.length - 1);
     difficultyCtx.strokeStyle = '#f00';
     difficultyCtx.beginPath();
     difficultyHistory.forEach((lvl, idx) => {
-        const x = 30 + idx * step;
-        const y = h - 20 - (lvl - 1) * ((h - 40) / 2);
+        const x = left + idx * step;
+        const y = bottom - (lvl - 1) * ((bottom - top) / 2);
         if (idx === 0) difficultyCtx.moveTo(x, y);
         else difficultyCtx.lineTo(x, y);
     });
     difficultyCtx.stroke();
     difficultyCtx.fillStyle = '#f00';
     difficultyHistory.forEach((lvl, idx) => {
-        const x = 30 + idx * step;
-        const y = h - 20 - (lvl - 1) * ((h - 40) / 2);
+        const x = left + idx * step;
+        const y = bottom - (lvl - 1) * ((bottom - top) / 2);
         difficultyCtx.beginPath();
         difficultyCtx.arc(x, y, 3, 0, Math.PI * 2);
         difficultyCtx.fill();
@@ -1001,6 +1024,7 @@ function drawDifficultyChart() {
 function recordDifficulty(level) {
     difficultyHistory.push(level);
     drawDifficultyChart();
+    if (currentDifficultyEl) currentDifficultyEl.textContent = DIFFICULTY_NAMES[level - 1];
 }
 
 function updateInfo() {
@@ -1180,6 +1204,7 @@ function startGame() {
     resetBoxes();
     difficultyHistory = [];
     drawDifficultyChart();
+    if (currentDifficultyEl) currentDifficultyEl.textContent = '-';
     initBoxes();
     setupLocks();
     updateInfo();
