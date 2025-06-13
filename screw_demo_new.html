@@ -287,6 +287,7 @@
         const MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
         const MAX_CHAIN_LENGTH = 5; // 1对1连线最大节点数(5=4条线)
         const MAX_LOCK_GROUPS = 4; // 同时最多锁定组数
+        const MAX_CONTROLLERS_PER_LOCK = 3; // 单个锁最多控制螺丝数量
         let MAX_TEMP_SLOTS = 5;
         // 记录最近一次拔出螺丝的格子
         let lastRemovedCell = null;
@@ -806,11 +807,13 @@
             if (locked.dot) {
                 locked.dot.dataset.blocked = 'true';
                 locked.dot.classList.add('blocked');
-                const ov = document.createElement('div');
-                ov.className = 'lock-overlay';
-                ov.textContent = '🔒';
-                locked.dot.appendChild(ov);
-                locked.overlay = ov;
+                if (!locked.overlay) {
+                    const ov = document.createElement('div');
+                    ov.className = 'lock-overlay';
+                    ov.textContent = '🔒';
+                    locked.dot.appendChild(ov);
+                    locked.overlay = ov;
+                }
             }
             if (controller.dot && locked.dot) {
                 const line = drawLine(controller.dot, locked.dot);
@@ -872,18 +875,22 @@
                     if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
                     const requiredDepth = maxColorLockDepth(locked.color);
                     if (requiredDepth === 0 && Math.random() > baseProb) continue;
-                    const controllers = all.filter(c => c !== locked && canControl(c, locked));
+                    let controllers = all.filter(c => c !== locked && canControl(c, locked));
                     if (controllers.length === 0) continue;
                     controllers.sort((a, b) => {
                         const da = Math.abs(a.row - locked.row) + Math.abs(a.col - locked.col);
                         const db = Math.abs(b.row - locked.row) + Math.abs(b.col - locked.col);
                         return da - db;
                     });
-                    let controller = controllers.find(c => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
-                    if (controller && applyLock(controller, locked)) {
-                        currentGroups.add(locked.id);
-                        if (currentGroups.size >= getLockGroupLimit()) break;
+                    controllers = controllers.filter(c => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
+                    if (controllers.length === 0) continue;
+                    const limit = Math.min(getLockControllerLimit(), controllers.length);
+                    const count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+                    for (let i = 0; i < count; i++) {
+                        applyLock(controllers[i], locked);
                     }
+                    currentGroups.add(locked.id);
+                    if (currentGroups.size >= getLockGroupLimit()) break;
                 }
                 if (currentGroups.size >= getLockGroupLimit()) break;
             }
@@ -1224,6 +1231,14 @@
             if (progress < 0.33) return 2;
             if (progress < 0.66) return 3;
             return MAX_LOCK_GROUPS;
+        }
+
+        function getLockControllerLimit() {
+            const eliminated = parseInt(eliminatedCountEl.textContent || '0');
+            const progress = eliminated / TOTAL_SCREWS;
+            if (progress < 0.33) return 1;
+            if (progress < 0.66) return 2;
+            return MAX_CONTROLLERS_PER_LOCK;
         }
 
         function disableGame() {
