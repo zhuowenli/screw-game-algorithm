@@ -943,8 +943,24 @@ function evaluateDifficulty(color) {
         (d) => d.dataset.color === color
     );
     const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
-    if (accessible >= 3) return 1; // 简单
-    if (dots.length >= 3) return 2; // 中等
+    const blocked = dots.length - accessible;
+
+    let inBoxes = 0;
+    boxes.forEach((box) => {
+        [...box.children].forEach((slot) => {
+            if (slot.dataset.filled && slot.dataset.color === color) inBoxes++;
+        });
+    });
+
+    const inTemps = tempSlotsState.filter(
+        (d) => d && d.dataset.color === color
+    ).length;
+
+    const accessibleTotal = accessible + inBoxes + inTemps;
+    const availableTotal = accessibleTotal + blocked;
+
+    if (accessibleTotal >= 3) return 1; // 简单
+    if (availableTotal >= 3) return 2; // 中等
     return 3; // 困难
 }
 
