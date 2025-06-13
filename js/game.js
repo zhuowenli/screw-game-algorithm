@@ -67,12 +67,18 @@ const initialBoxStates = Array.from(boxes).map((b) => b.dataset.enabled === 'tru
 const message = document.getElementById('message');
 const totalCountEl = document.getElementById('total-count');
 const eliminatedCountEl = document.getElementById('eliminated-count');
+const progressCountEl = document.getElementById('progress-count');
 const remainingCountEl = document.getElementById('remaining-count');
 const onboardCountEl = document.getElementById('onboard-count');
 const queueCountEl = document.getElementById('queue-count');
 const colorCountEl = document.getElementById('color-count');
 const colorStats = document.getElementById('color-stats');
 const addTempSlotBtn = document.getElementById('add-temp-slot');
+const difficultyCanvas = document.getElementById('difficulty-canvas');
+let difficultyCtx = difficultyCanvas.getContext('2d');
+let difficultyHistory = [];
+const currentDifficultyEl = document.getElementById('current-difficulty');
+const DIFFICULTY_NAMES = ['低', '中', '高'];
 
 const cellMap = [];
 let activeCells = [];
@@ -728,6 +734,9 @@ function setupBox(box, isHint = false) {
         box.appendChild(slot);
     }
 
+    const level = evaluateOverallDifficulty();
+    recordDifficulty(level);
+
     absorbTempDots(color, box);
     updateInfo();
 }
@@ -932,6 +941,88 @@ function showMessage(msg) {
     message.textContent = msg;
 }
 
+function evaluateDifficultyForColor(color) {
+    const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
+    const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
+    const blocked = dots.length - accessible;
+
+    let inBoxes = 0;
+    boxes.forEach((box) => {
+        [...box.children].forEach((slot) => {
+            if (slot.dataset.filled && slot.dataset.color === color) inBoxes++;
+        });
+    });
+
+    const inTemps = tempSlotsState.filter((d) => d && d.dataset.color === color).length;
+
+    const accessibleTotal = accessible + inBoxes + inTemps;
+    const availableTotal = accessibleTotal + blocked;
+
+    if (accessibleTotal >= 3) return 1; // 简单
+    if (availableTotal >= 3) return 2; // 中等
+    return 3; // 困难
+}
+
+function evaluateOverallDifficulty() {
+    let minLevel = 3;
+    boxes.forEach((box) => {
+        if (box.dataset.enabled === 'true') {
+            const lvl = evaluateDifficultyForColor(box.dataset.color);
+            if (lvl < minLevel) minLevel = lvl;
+        }
+    });
+    return minLevel;
+}
+
+function drawDifficultyChart() {
+    if (!difficultyCtx) return;
+    const w = difficultyCanvas.width;
+    const h = difficultyCanvas.height;
+    difficultyCtx.clearRect(0, 0, w, h);
+    difficultyCtx.strokeStyle = '#000';
+    difficultyCtx.beginPath();
+    const left = 40;
+    const top = 20;
+    const bottom = h - 30;
+    difficultyCtx.moveTo(left, top);
+    difficultyCtx.lineTo(left, bottom);
+    difficultyCtx.lineTo(w - 10, bottom);
+    difficultyCtx.stroke();
+
+    difficultyCtx.font = '14px sans-serif';
+    difficultyCtx.fillStyle = '#000';
+    difficultyCtx.textAlign = 'right';
+    difficultyCtx.fillText('高', left - 5, top + 5);
+    difficultyCtx.fillText('中', left - 5, top + (bottom - top) / 2 + 5);
+    difficultyCtx.fillText('低', left - 5, bottom + 5);
+
+    if (difficultyHistory.length === 0) return;
+    const step = (w - left - 10) / Math.max(1, difficultyHistory.length - 1);
+    difficultyCtx.strokeStyle = '#f00';
+    difficultyCtx.beginPath();
+    difficultyHistory.forEach((lvl, idx) => {
+        const x = left + idx * step;
+        const y = bottom - (lvl - 1) * ((bottom - top) / 2);
+        if (idx === 0) difficultyCtx.moveTo(x, y);
+        else difficultyCtx.lineTo(x, y);
+    });
+    difficultyCtx.stroke();
+    difficultyCtx.fillStyle = '#f00';
+    difficultyHistory.forEach((lvl, idx) => {
+        const x = left + idx * step;
+        const y = bottom - (lvl - 1) * ((bottom - top) / 2);
+        difficultyCtx.beginPath();
+        difficultyCtx.arc(x, y, 3, 0, Math.PI * 2);
+        difficultyCtx.fill();
+    });
+}
+
+function recordDifficulty(level) {
+    difficultyHistory.push(level);
+    drawDifficultyChart();
+    if (currentDifficultyEl) currentDifficultyEl.textContent = DIFFICULTY_NAMES[level - 1];
+}
+
 function updateInfo() {
     totalCountEl.textContent = TOTAL_SCREWS;
     const queue = totalRemainingPool();
@@ -943,6 +1034,7 @@ function updateInfo() {
     const eliminated = TOTAL_SCREWS - remaining;
     remainingCountEl.textContent = remaining;
     eliminatedCountEl.textContent = eliminated;
+    progressCountEl.textContent = ((eliminated / TOTAL_SCREWS) * 100).toFixed(2) + '%';
     onboardCountEl.textContent = onBoard;
     queueCountEl.textContent = queue;
     const dots = document.querySelectorAll('#game-board .dot');
@@ -1107,6 +1199,9 @@ function startGame() {
         spawnNextPlate();
     }
     resetBoxes();
+    difficultyHistory = [];
+    drawDifficultyChart();
+    if (currentDifficultyEl) currentDifficultyEl.textContent = '-';
     initBoxes();
     setupLocks();
     updateInfo();

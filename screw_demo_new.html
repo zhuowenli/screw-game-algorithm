@@ -212,6 +212,19 @@
             font-size: 1.2em;
             color: red;
         }
+
+        #difficulty-panel {
+            margin-top: 30px;
+        }
+
+        #difficulty-text {
+            margin-bottom: 10px;
+        }
+
+        #difficulty-panel canvas {
+            background: #fff;
+            border: 1px solid #ccc;
+        }
     </style>
 </head>
 
@@ -252,6 +265,7 @@
     <div id="info-panel">
         <div>关卡总螺丝数:<span id="total-count"></span></div>
         <div>已消除螺丝数:<span id="eliminated-count">0</span></div>
+        <div>关卡进度:<span id="progress-count">0</span></div>
         <div>未消除螺丝数:<span id="remaining-count">0</span></div>
         <div>场上螺丝数:<span id="onboard-count">0</span></div>
         <div>队列中螺丝数:<span id="queue-count">0</span></div>
@@ -262,6 +276,12 @@
     <div id="game-board"><svg id="line-layer"></svg></div>
 
     <div id="message"></div>
+
+    <div id="difficulty-panel">
+        <h2>难度信息</h2>
+        <div id="difficulty-text">当前难度:<span id="current-difficulty">-</span></div>
+        <canvas id="difficulty-canvas" width="600" height="200"></canvas>
+    </div>
 
     <script src='js/game.js'></script>
 </body>
