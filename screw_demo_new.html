@@ -888,7 +888,7 @@
 
         function checkPlateRemoval(cell) {
             activePlates.forEach(plate => {
-                boxPool[c] > 0 && sceneCounts[c] > 0
+                const dots = plate.screws.filter(s => s.cell && s.cell.querySelector('.dot') && s.dot);
                 if (dots.length === 0) {
                     removePlate(plate);
                     spawnNextPlate();
@@ -915,7 +915,7 @@
             const sceneCounts = countSceneColors();
 
             const candidateColors = COLORS.filter(c =>
-                boxPool[c] > 0 && (colorPool[c] > 0 || sceneCounts[c] > 0)
+                boxPool[c] > 0 && sceneCounts[c] > 0
             );
             let availableColors = candidateColors.filter(c => !usedBoxColors.has(c));
             if (availableColors.length === 0) {
