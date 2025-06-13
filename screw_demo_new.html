@@ -886,18 +886,26 @@
             }
         }
 
-        function checkPlateRemoval(cell) {
-            activePlates.forEach(plate => {
-                const dots = plate.screws.filter(s => s.cell && s.cell.querySelector('.dot') && s.dot);
-                if (dots.length === 0) {
-                    removePlate(plate);
-                    spawnNextPlate();
-                } else {
-                    const locked = plate.screws.filter(s => s.locked);
-                    if (dots.length === locked.length) {
-                        const s = locked[0];
-                        s.locked = false;
-                        s.controller = null;
+            const tempCounts = Object.fromEntries(COLORS.map(c => [c, 0]));
+            tempSlotsState.forEach(d => {
+                if (d) tempCounts[d.dataset.color]++;
+            });
+            const boardCounts = countBoardColors();
+            let candidateColors = COLORS.filter(c => boxPool[c] > 0 && tempCounts[c] > 0);
+            let weights = {};
+            if (candidateColors.length > 0) {
+                let available = candidateColors.filter(c => !usedBoxColors.has(c));
+                if (available.length === 0) available = candidateColors;
+                candidateColors = available;
+                weights = Object.fromEntries(candidateColors.map(c => [c, Math.pow(tempCounts[c], 2)]));
+            } else {
+                candidateColors = COLORS.filter(c => boxPool[c] > 0 && boardCounts[c] > 0);
+                let available = candidateColors.filter(c => !usedBoxColors.has(c));
+                if (available.length === 0) available = candidateColors;
+                candidateColors = available;
+                weights = Object.fromEntries(candidateColors.map(c => [c, Math.pow(boardCounts[c] + 1, 2)]));
+            if (candidateColors.length === 0) {
+            const color = weightedRandom(candidateColors, weights);
                         if (s.overlay) {
                             s.overlay.remove();
                             s.overlay = null;
