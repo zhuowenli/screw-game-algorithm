@@ -30,6 +30,40 @@ let selectedDifficulty = 25; // 默认难度
 const DIFFICULTY_LEVELS = [];
 const NUM_DIFFICULTY_LEVELS = 50;
 
+const COMPONENT_CONFIG = {
+    LARGE: {
+        count: 1,
+        layers: () => 5 + Math.floor(Math.random() * 6), // 5-10
+        screwsPerLayer: () => 3 + Math.floor(Math.random() * 6), // 3-8
+        size: { width: 10, height: 10 },
+    },
+    MEDIUM: {
+        count: () => 4 + Math.floor(Math.random() * 3), // 4-6
+        layers: () => 3 + Math.floor(Math.random() * 3), // 3-5
+        screwsPerLayer: () => 2 + Math.floor(Math.random() * 5), // 2-6
+        size: { width: 6, height: 6 },
+    },
+    SMALL: {
+        count: () => 25 + Math.floor(Math.random() * 6), // 25+
+        layers: () => 1 + Math.floor(Math.random() * 2), // 1-2
+        screwsPerLayer: () => 1,
+        size: { width: 3, height: 3 },
+    },
+};
+
+// 全局状态
+let components = [];
+let nextComponentId = 0;
+
+// Global scope for getColorTier so it can be used by generateComponents
+const colorTiers = { tier1: [], tier2: [], tier3: [] };
+const getColorTier = (color) => {
+    if (colorTiers.tier1.includes(color)) return 1;
+    if (colorTiers.tier2.includes(color)) return 2;
+    if (colorTiers.tier3.includes(color)) return 3;
+    return 4; // Should not happen
+};
+
 function interpolate(start, end, steps, step) {
     return Math.round(start + (end - start) * (step / (steps - 1)));
 }
@@ -50,7 +84,7 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
 let COLOR_TOTALS = {};
 let COLOR_BOX_TOTALS = {};
 let colorPool = {};
-let boxPool = {};
+let boxColorQueue = [];
 
 /**
  * 初始化颜色池和盒子池
@@ -60,10 +94,12 @@ function initPools() {
     COLOR_TOTALS = {};
     COLORS.forEach((c) => (COLOR_TOTALS[c] = 0));
 
-    for (const plate of boardData) {
-        for (const screw of plate.screws) {
-            if (COLOR_TOTALS[screw.color] !== undefined) {
-                COLOR_TOTALS[screw.color]++;
+    for (const component of components) {
+        for (const plate of component.plates) {
+            for (const screw of plate.screws) {
+                if (COLOR_TOTALS[screw.color] !== undefined) {
+                    COLOR_TOTALS[screw.color]++;
+                }
             }
         }
     }
@@ -72,13 +108,128 @@ function initPools() {
     colorPool = {
         ...COLOR_TOTALS,
     };
-    boxPool = {
-        ...COLOR_BOX_TOTALS,
-    };
 }
 
-let boardData = [];
-let boardState = [];
+function isAreaOverlapping(newArea, occupiedAreas) {
+    for (const existing of occupiedAreas) {
+        if (
+            newArea.col < existing.col + existing.width &&
+            newArea.col + newArea.width > existing.col &&
+            newArea.row < existing.row + existing.height &&
+            newArea.row + newArea.height > existing.row
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function generateComponents(screwColorPlan) {
+    const plan = [...screwColorPlan];
+    components = [];
+    nextComponentId = 0;
+
+    const createComponentFromPlan = (type, config) => {
+        if (plan.length === 0) return null;
+
+        const comp = {
+            id: nextComponentId++,
+            type: type,
+            area: null, // Position is NOT determined here
+            plates: [],
+            currentPlateIndex: 0,
+            isComplete: false,
+            isSpawned: false, // NEW STATE
+            priority: Infinity, // NEW: For sorting
+            domElements: {},
+        };
+
+        const layersToCreate = config.layers();
+        for (let i = 0; i < layersToCreate; i++) {
+            if (plan.length === 0) break;
+            const plateId = `${comp.id}-${i}`;
+            const numScrews = Math.min(config.screwsPerLayer(), plan.length);
+            const screws = [];
+            for (let j = 0; j < numScrews; j++) {
+                if (plan.length === 0) break;
+                const color = plan.shift();
+                screws.push({
+                    color,
+                    group: comp.id,
+                    stage: 0,
+                    id: nextScrewId++,
+                    plateId,
+                    componentId: comp.id,
+                    cell: null,
+                    dot: null,
+                    locked: false,
+                    controller: null,
+                    control: null,
+                    controllers: [],
+                    overlay: null,
+                });
+            }
+            if (screws.length > 0) {
+                comp.plates.push({ id: plateId, screws });
+            }
+        }
+
+        // Set component priority based on the earliest color tier it contains
+        if (comp.plates.length > 0 && comp.plates[0].screws.length > 0) {
+            const firstScrewColor = comp.plates[0].screws[0].color;
+            comp.priority = getColorTier(firstScrewColor);
+        }
+
+        return comp.plates.length > 0 ? comp : null;
+    };
+
+    // 1. Create the Large Component
+    const largeComp = createComponentFromPlan('LARGE', COMPONENT_CONFIG.LARGE);
+    if (largeComp) components.push(largeComp);
+
+    // 2. Create Medium Components
+    const medConfig = COMPONENT_CONFIG.MEDIUM;
+    const medCount = Math.max(1, medConfig.count() - (1 + Math.floor(Math.random() * 2))); // Create 1 or 2 fewer
+    for (let i = 0; i < medCount; i++) {
+        if (plan.length === 0) break;
+        const medComp = createComponentFromPlan('MEDIUM', medConfig);
+        if (medComp) components.push(medComp);
+    }
+
+    // 3. Create Small Components with ALL remaining screws. This is the "兜底".
+    const smallConfig = COMPONENT_CONFIG.SMALL;
+    while (plan.length > 0) {
+        const smallComp = createComponentFromPlan('SMALL', smallConfig);
+        if (smallComp) {
+            components.push(smallComp);
+        } else {
+            break;
+        }
+    }
+
+    // Sort components by priority to ensure staged rollout of colors
+    components.sort((a, b) => a.priority - b.priority);
+
+    if (plan.length > 0) {
+        console.error('CRITICAL: generateComponents failed to consume the entire plan.', { remaining: plan.length });
+        throw new Error('未能用完所有计划中的螺丝。');
+    }
+}
+
+/**
+ * 初始化游戏面板状态
+ * 将生成的板块数据转换为游戏状态
+ */
+function initBoardState() {
+    for (const k in screwMap) delete screwMap[k];
+    for (const component of components) {
+        for (const plate of component.plates) {
+            for (const s of plate.screws) {
+                screwMap[s.id] = s;
+            }
+        }
+    }
+}
 
 const board = document.getElementById('game-board');
 let lineLayer = document.getElementById('line-layer');
@@ -116,6 +267,9 @@ let activePlates = [];
 let isClickDot = false;
 // 控制板块与螺丝的层级，每层之间相差 10，方便调试
 let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成，确保新板块在下层
+
+const eliminatedScrewIds = new Set();
+let hintMessageShown = false;
 
 /**
  * 创建游戏网格
@@ -214,52 +368,6 @@ function generateBoardData(screwColorPlan) {
 }
 
 /**
- * 初始化游戏面板状态
- * 将生成的板块数据转换为游戏状态
- */
-function initBoardState() {
-    nextPlateZ = 1000;
-    plates = boardData.map((p) => {
-        const plate = {
-            id: p.id,
-            row: p.row,
-            col: p.col,
-            width: p.width,
-            height: p.height,
-            color: `rgba(${Math.floor(Math.random() * 256)},${Math.floor(Math.random() * 256)},${Math.floor(Math.random() * 256)},0.6)`,
-            screws: p.screws.map((s) => ({
-                id: s.id,
-                row: s.row,
-                col: s.col,
-                color: s.color,
-                group: s.group,
-                stage: s.stage,
-                cell: null,
-                dot: null,
-                locked: false,
-                controller: null,
-                control: null,
-                controllers: [],
-                overlay: null,
-                plateId: p.id,
-            })),
-            zIndex: nextPlateZ,
-        };
-        nextPlateZ -= 10;
-        return plate;
-    });
-    boardState = plates;
-    for (const k in screwMap) delete screwMap[k];
-    for (const p of plates) {
-        for (const s of p.screws) {
-            screwMap[s.id] = s;
-        }
-    }
-    nextPlateIndex = 0;
-    failedPlates = [];
-}
-
-/**
  * 初始化临时槽位
  * 创建指定数量的临时槽位用于存放螺丝
  */
@@ -313,13 +421,6 @@ function setDifficulty(opts) {
             }
         }
     }
-    if (opts.boxPool) {
-        for (const c in opts.boxPool) {
-            if (boxPool[c] !== undefined) {
-                boxPool[c] = opts.boxPool[c];
-            }
-        }
-    }
     updateInfo();
 }
 
@@ -361,110 +462,48 @@ function removeDot(dot) {
         renderTempSlots();
     }
     dot.remove();
-    if (cell) checkPlateRemoval(cell);
-}
 
-/**
- * 在场景中生成一个板块及其螺丝
- * @param {Object} plate 板块对象
- * @returns {boolean} 是否成功生成板块
- */
-function spawnPlate(plate) {
-    const overlay = document.createElement('div');
-    overlay.className = 'plate';
-    overlay.style.backgroundColor = plate.color;
-    overlay.style.left = plate.col * 32 + 'px';
-    overlay.style.top = plate.row * 32 + 'px';
-    overlay.style.width = plate.width * 32 - 2 + 'px';
-    overlay.style.height = plate.height * 32 - 2 + 'px';
-    overlay.style.zIndex = plate.zIndex;
-    board.appendChild(overlay);
-    const used = new Set();
-    let placed = 0;
-    for (const screw of plate.screws) {
-        let cell = cellMap[screw.row][screw.col];
-        if (cell.querySelector('.dot')) {
-            const candidates = [];
-            for (let r = plate.row; r < plate.row + plate.height; r++) {
-                for (let c = plate.col; c < plate.col + plate.width; c++) {
-                    const candidate = cellMap[r][c];
-                    const key = `${r}-${c}`;
-                    if (!candidate.querySelector('.dot') && !used.has(key)) {
-                        candidates.push(candidate);
-                    }
-                }
-            }
-            if (candidates.length === 0) continue;
-            cell = candidates[Math.floor(Math.random() * candidates.length)];
+    if (screw) {
+        const component = components.find((c) => c.id === screw.componentId);
+        if (component) {
+            checkPlateCompletion(component);
         }
-        used.add(`${cell.dataset.row}-${cell.dataset.col}`);
-        screw.cell = cell;
-        cell.dataset.plateId = plate.id;
-        const dot = spawnDot(screw, cell);
-        dot.style.zIndex = plate.zIndex + 1;
-        screw.dot = dot;
-        placed++;
     }
-    if (placed === 0) {
-        overlay.remove();
-        return false;
-    }
-    plate.overlay = overlay;
-    activePlates.push(plate);
-    updateDotBlockStates();
-    updateInfo();
-    return true;
+    checkScrewCountAndReplenish();
 }
 
-/**
- * 移除板块
- * @param {Object} plate 要移除的板块对象
- */
-function removePlate(plate) {
-    plate.overlay && plate.overlay.remove();
+function removePlateDOM(plate) {
+    if (plate.domElement) {
+        plate.domElement.remove();
+        plate.domElement = null;
+    }
     for (const screw of plate.screws) {
-        if (screw.dot) screw.dot.remove();
+        if (screw.dot) {
+            screw.dot.remove();
+            screw.dot = null;
+        }
         lockConnections.slice().forEach((conn) => {
             if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
         });
         if (screw.cell) {
-            // checkPlateRemoval(screw.cell);
             screw.cell.dataset.plateId = '';
+            screw.cell.dataset.componentId = '';
+            screw.cell = null;
         }
     }
-    activePlates = activePlates.filter((p) => p !== plate);
     cleanupOrphanLocks();
-    updateDotBlockStates();
     updateInfo();
 }
 
-/**
- * 根据当前板块层级，控制螺丝的可点击状态
- * 计算每个螺丝是否被上层板块遮挡
- */
 function updateDotBlockStates() {
-    const topMap = {};
-    // 计算每个格子上方覆盖的最高板块
-    const sorted = [...activePlates].sort((a, b) => a.zIndex - b.zIndex);
-    for (const plate of sorted) {
-        for (let r = plate.row; r < plate.row + plate.height; r++) {
-            for (let c = plate.col; c < plate.col + plate.width; c++) {
-                const key = `${r}-${c}`;
-                topMap[key] = plate;
-            }
-        }
-    }
-
-    // 设置螺丝是否可点击
-    for (const plate of activePlates) {
-        for (const screw of plate.screws) {
-            if (!screw.dot || !screw.cell) continue;
-            const key = `${screw.cell.dataset.row}-${screw.cell.dataset.col}`;
-            const top = topMap[key];
-            const blocked = !(top && top.id === plate.id) || screw.locked;
-            screw.dot.dataset.blocked = blocked ? 'true' : 'false';
-            screw.dot.classList.toggle('blocked', blocked);
-        }
+    // This function is now deprecated as per new requirements.
+    // Screws are always clickable unless logically locked.
+    for (const id in screwMap) {
+        const screw = screwMap[id];
+        if (!screw.dot) continue;
+        const blocked = screw.locked;
+        screw.dot.dataset.blocked = blocked ? 'true' : 'false';
+        screw.dot.classList.toggle('blocked', blocked);
     }
 }
 
@@ -490,8 +529,14 @@ function cleanupOrphanLocks() {
             conn.locked.controller = null;
             conn.locked.controllers = conn.locked.controllers.filter((c) => c !== conn.controller);
             conn.controller.control = null;
-            if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
-            if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
+            if (conn.locked.cell) {
+                const comp = components.find((c) => c.id === conn.locked.componentId);
+                if (comp) checkPlateCompletion(comp);
+            }
+            if (conn.controller.cell) {
+                const comp = components.find((c) => c.id === conn.controller.componentId);
+                if (comp) checkPlateCompletion(comp);
+            }
         }
         return valid;
     });
@@ -531,8 +576,14 @@ function cleanupOrphanLocks() {
             conn.locked.controller = conn.locked.controllers[0];
         }
         conn.controller.control = null;
-        if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
-        if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
+        if (conn.locked.cell) {
+            const comp = components.find((c) => c.id === conn.locked.componentId);
+            if (comp) checkPlateCompletion(comp);
+        }
+        if (conn.controller.cell) {
+            const comp = components.find((c) => c.id === conn.controller.componentId);
+            if (comp) checkPlateCompletion(comp);
+        }
     }
     if (mutual.size > 0) {
         lockConnections = lockConnections.filter((c) => !mutual.has(c));
@@ -626,8 +677,14 @@ function removeConnection(conn) {
     conn.controller.control = null;
     lockConnections = lockConnections.filter((c) => c !== conn);
     cleanupOrphanLocks();
-    if (conn.locked.cell) checkPlateRemoval(conn.locked.cell);
-    if (conn.controller.cell) checkPlateRemoval(conn.controller.cell);
+    if (conn.locked.cell) {
+        const comp = components.find((c) => c.id === conn.locked.componentId);
+        if (comp) checkPlateCompletion(comp);
+    }
+    if (conn.controller.cell) {
+        const comp = components.find((c) => c.id === conn.controller.componentId);
+        if (comp) checkPlateCompletion(comp);
+    }
 }
 
 /**
@@ -671,7 +728,7 @@ function applyLock(controller, locked) {
  * @returns {boolean} 是否可以控制
  */
 function canControl(controller, target) {
-    if (controller.plateId !== target.plateId) return false;
+    if (controller.componentId !== target.componentId) return false;
     if (controller.control) return false;
     let c = controller;
     let depth = 1;
@@ -720,8 +777,7 @@ function maxColorLockDepth(color) {
  * @returns {number} 游戏进度 (0-1)
  */
 function getProgress() {
-    const eliminated = parseInt(eliminatedCountEl.textContent || '0');
-    return TOTAL_SCREWS > 0 ? eliminated / TOTAL_SCREWS : 0;
+    return TOTAL_SCREWS > 0 ? eliminatedScrewIds.size / TOTAL_SCREWS : 0;
 }
 
 /**
@@ -731,24 +787,28 @@ function getProgress() {
 function getStageModifiers() {
     const progress = getProgress();
 
+    if (progress < 0.1) {
+        // Stage 0: Tutorial, very few locks
+        return { lockProbFactor: 0.1, connectionMultiplier: 1.0, extraConnections: 0, hint: '' };
+    }
     if (progress < 0.3) {
-        // 阶段1: 正常
+        // Stage 1: Normal
         return { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0, hint: '' };
     }
     if (progress < 0.5) {
-        // 阶段2: 紧张
+        // Stage 2: Tense
         return { lockProbFactor: 1.5, connectionMultiplier: 1.2, extraConnections: 0, hint: '' };
     }
     if (progress < 0.7) {
-        // 阶段3: 危险
+        // Stage 3: Dangerous
         return { lockProbFactor: 2.0, connectionMultiplier: 1.5, extraConnections: 1 + Math.floor(Math.random() * 2), hint: '' };
     }
-    // 阶段4: 付费引导
+    // Stage 4: Monetization Hook
     return {
         lockProbFactor: 2.5,
         connectionMultiplier: 1.5,
         extraConnections: 1 + Math.floor(Math.random() * 2),
-        hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
+        // hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
     };
 }
 
@@ -758,57 +818,50 @@ function getStageModifiers() {
  * @param {Array<string>} allColors - 当前关卡可用的所有颜色
  * @returns {Array<string>} 一个包含所有螺丝颜色的打乱数组
  */
-function planColorDistribution(totalBoxes, allColors) {
-    const maxColorsForLevel = allColors.length;
-    let screwColorPlan1 = [];
-    let screwColorPlan2 = [];
-    let screwColorPlan3 = [];
-
-    const stage1_boxes = Math.floor(totalBoxes * 0.2);
-    const stage2_boxes = Math.floor(totalBoxes * 0.4);
-    const stage3_boxes = totalBoxes - stage1_boxes - stage2_boxes;
-
-    // 阶段1: 使用较少的颜色
-    const stage1_colors = allColors.slice(0, Math.min(maxColorsForLevel, 4));
-    for (let i = 0; i < stage1_boxes; i++) {
-        const color = stage1_colors[Math.floor(Math.random() * stage1_colors.length)];
-        screwColorPlan1.push(color, color, color);
+function planColorDistribution(boxColorPlan, allColorsForLevel) {
+    const screwColorPlan = [];
+    for (const color of boxColorPlan) {
+        screwColorPlan.push(color, color, color);
     }
 
-    // 阶段2: 引入更多颜色
-    const stage2_colors = allColors.slice(0, Math.min(maxColorsForLevel, 6));
-    for (let i = 0; i < stage2_boxes; i++) {
-        const color = stage2_colors[Math.floor(Math.random() * stage2_colors.length)];
-        screwColorPlan2.push(color, color, color);
-    }
+    // Staged color introduction logic
+    const colorTiers = {
+        tier1: allColorsForLevel.slice(0, 4),
+        tier2: allColorsForLevel.slice(4, 7),
+        tier3: allColorsForLevel.slice(7),
+    };
 
-    // 阶段3: 使用所有可用颜色
-    const stage3_colors = allColors;
-    for (let i = 0; i < stage3_boxes; i++) {
-        const color = stage3_colors[Math.floor(Math.random() * stage3_colors.length)];
-        screwColorPlan3.push(color, color, color);
-    }
+    const getColorTier = (color) => {
+        if (colorTiers.tier1.includes(color)) return 1;
+        if (colorTiers.tier2.includes(color)) return 2;
+        if (colorTiers.tier3.includes(color)) return 3;
+        return 4; // Should not happen
+    };
 
-    // 打乱颜色顺序，使其在板块中随机分布
-    for (let i = screwColorPlan1.length - 1; i > 0; i--) {
+    screwColorPlan.sort((a, b) => {
+        const tierA = getColorTier(a);
+        const tierB = getColorTier(b);
+        if (tierA !== tierB) {
+            return tierA - tierB;
+        }
+        return Math.random() - 0.5; // Shuffle within the same tier
+    });
+
+    return screwColorPlan;
+}
+
+function planBoxes(totalBoxes, availableColors) {
+    const boxPlan = [];
+    for (let i = 0; i < totalBoxes; i++) {
+        const color = availableColors[i % availableColors.length];
+        boxPlan.push(color);
+    }
+    // Shuffle the box plan for randomness
+    for (let i = boxPlan.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [screwColorPlan1[i], screwColorPlan1[j]] = [screwColorPlan1[j], screwColorPlan1[i]];
+        [boxPlan[i], boxPlan[j]] = [boxPlan[j], boxPlan[i]];
     }
-    for (let i = screwColorPlan2.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [screwColorPlan2[i], screwColorPlan2[j]] = [screwColorPlan2[j], screwColorPlan2[i]];
-    }
-    for (let i = screwColorPlan3.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [screwColorPlan3[i], screwColorPlan3[j]] = [screwColorPlan3[j], screwColorPlan3[i]];
-    }
-
-    console.log(screwColorPlan1);
-    console.log('screwColorPlan1:', stage1_colors, screwColorPlan1.length);
-    console.log('screwColorPlan2:', stage2_colors, screwColorPlan2.length);
-    console.log('screwColorPlan3:', stage3_colors, screwColorPlan3.length);
-
-    return [...screwColorPlan1, ...screwColorPlan2, ...screwColorPlan3];
+    return boxPlan;
 }
 
 /**
@@ -817,23 +870,38 @@ function planColorDistribution(totalBoxes, allColors) {
  */
 function setupLocks(newScrews) {
     const free = tempSlotsState.filter((d) => d === null).length;
-    const { lockProbFactor, connectionMultiplier, extraConnections } = getStageModifiers();
+    const { lockProbFactor, connectionMultiplier, extraConnections, hint } = getStageModifiers();
+
+    if (hint && !hintMessageShown) {
+        showMessage(hint);
+        hintMessageShown = true; // Ensure message is shown only once per game
+    }
+
     const baseProb = Math.min(0.8, 0.2 + free * 0.1);
-    const platesToCheck = newScrews ? [...new Set(newScrews.map((s) => activePlates.find((p) => p.id === s.plateId)))] : activePlates;
-    let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
-    for (const plate of platesToCheck) {
-        const all = plate.screws;
-        const candidates = (newScrews ? newScrews : all).filter((s) => all.includes(s) && s.controllers.length === 0);
-        for (const locked of candidates) {
+
+    const screwsByComponent = {};
+    if (!newScrews) return;
+    for (const screw of newScrews) {
+        if (!screwsByComponent[screw.componentId]) {
+            screwsByComponent[screw.componentId] = [];
+        }
+        screwsByComponent[screw.componentId].push(screw);
+    }
+
+    for (const componentId in screwsByComponent) {
+        const componentScrews = screwsByComponent[componentId];
+        let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
+
+        for (const locked of componentScrews) {
             if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
             const requiredDepth = maxColorLockDepth(locked.color);
 
             if (requiredDepth === 0) {
-                const finalProb = Math.min(baseProb * lockProbFactor, 0.95); // 锁定概率最高95%
+                const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
                 if (Math.random() > finalProb) continue;
             }
 
-            let controllers = all.filter((c) => c !== locked && canControl(c, locked));
+            let controllers = componentScrews.filter((c) => c !== locked && canControl(c, locked));
             if (controllers.length === 0) continue;
             controllers.sort((a, b) => {
                 const da = Math.abs(a.row - locked.row) + Math.abs(a.col - locked.col);
@@ -844,9 +912,11 @@ function setupLocks(newScrews) {
             if (controllers.length === 0) continue;
             const limit = Math.min(getLockControllerLimit(), controllers.length);
             let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+
+            // Apply difficulty modifiers
             count = Math.round(count * connectionMultiplier);
             count += extraConnections;
-            count = Math.min(count, controllers.length);
+            count = Math.min(count, controllers.length, MAX_CONTROLLERS_PER_LOCK);
 
             for (let i = 0; i < count; i++) {
                 applyLock(controllers[i], locked);
@@ -854,230 +924,186 @@ function setupLocks(newScrews) {
             currentGroups.add(locked.id);
             if (currentGroups.size >= getLockGroupLimit()) break;
         }
-        if (currentGroups.size >= getLockGroupLimit()) break;
-    }
-}
 
-let failedPlates = [];
+        // NEW: Deadlock prevention logic
+        const totalScrewsInComponent = componentScrews.length;
+        const lockedScrewsInComponent = componentScrews.filter((s) => s.locked).length;
 
-/**
- * 生成下一个板块
- * 根据当前可见板块数量限制生成新板块
- */
-function spawnNextPlate() {
-    if (activePlates.length >= MAX_VISIBLE_PLATES) return;
-
-    let attempts = 0;
-    while (failedPlates.length > 0 && activePlates.length < MAX_VISIBLE_PLATES && attempts < failedPlates.length) {
-        const plate = failedPlates.shift();
-        if (spawnPlate(plate)) {
-            setupLocks(plate.screws);
-        } else {
-            failedPlates.push(plate);
-        }
-        attempts++;
-    }
-
-    while (nextPlateIndex < plates.length && activePlates.length < MAX_VISIBLE_PLATES) {
-        const next = plates[nextPlateIndex++];
-        if (spawnPlate(next)) {
-            setupLocks(next.screws);
-        } else {
-            failedPlates.push(next);
-        }
-        if (activePlates.length >= MAX_VISIBLE_PLATES) break;
-    }
-}
-
-/**
- * 检查板块是否需要移除
- * @param {Element} cell 格子元素
- */
-function checkPlateRemoval(cell) {
-    activePlates.forEach((plate) => {
-        const dots = plate.screws.filter((s) => s.cell && s.cell.querySelector('.dot') && s.dot);
-        if (dots.length === 0) {
-            removePlate(plate);
-            spawnNextPlate();
-        } else {
-            const locked = plate.screws.filter((s) => s.locked);
-            if (dots.length === locked.length) {
-                const s = locked[0];
-                s.locked = false;
-                s.controller = null;
-                s.controllers = [];
-                if (s.overlay) {
-                    s.overlay.remove();
-                    s.overlay = null;
+        if (totalScrewsInComponent > 0 && lockedScrewsInComponent === totalScrewsInComponent) {
+            // Deadlock detected! Unlock one screw.
+            const screwToUnlock = componentScrews.find((s) => s.locked); // Find any locked screw
+            if (screwToUnlock) {
+                // Find all connections locking this screw and remove them.
+                const connectionsToUnlock = lockConnections.filter((conn) => conn.locked === screwToUnlock);
+                for (const conn of connectionsToUnlock) {
+                    removeConnection(conn);
                 }
-                if (s.dot) {
-                    s.dot.dataset.blocked = 'false';
-                    s.dot.classList.remove('blocked');
-                }
+                console.warn(`Deadlock prevented in component ${componentId}. Unlocked screw ${screwToUnlock.id}.`);
             }
         }
-    });
+    }
 }
 
-/**
- * 设置盒子
- * @param {Element} box 盒子元素
- * @param {boolean} isHint 是否为提示模式
- */
-function setupBox(box, isHint = false) {
-    const tempCounts = Object.fromEntries(COLORS.map((c) => [c, 0]));
-    if (isHint) {
-        tempSlotsState.forEach((d) => {
-            if (d) tempCounts[d.dataset.color]++;
-        });
-    }
-    const boardCounts = countBoardColors();
+function checkPlateCompletion(component) {
+    const currentPlate = component.plates[component.currentPlateIndex];
+    if (!currentPlate) return;
 
-    let candidateColors = COLORS.filter((c) => boxPool[c] > 0 && tempCounts[c] > 0);
-    let weights = {};
-    if (candidateColors.length > 0) {
-        let available = candidateColors.filter((c) => !usedBoxColors.has(c));
-        if (available.length === 0) available = candidateColors;
-        candidateColors = available;
-        weights = Object.fromEntries(candidateColors.map((c) => [c, Math.pow(tempCounts[c], 2)]));
-    } else {
-        candidateColors = COLORS.filter((c) => boxPool[c] > 0 && boardCounts[c] > 0);
-        let available = candidateColors.filter((c) => !usedBoxColors.has(c));
-        if (available.length === 0) available = candidateColors;
-        candidateColors = available;
-        weights = Object.fromEntries(candidateColors.map((c) => [c, Math.pow(boardCounts[c] + 1, 2)]));
-    }
+    const remainingScrews = currentPlate.screws.filter((s) => s.dot);
 
-    if (candidateColors.length === 0) {
-        box.dataset.enabled = 'false';
-        box.classList.remove('enabled');
-        box.style.borderColor = '#ccc';
-        box.innerHTML = '';
+    if (remainingScrews.length === 0) {
+        removePlateDOM(currentPlate);
+        component.currentPlateIndex++;
+
+        if (component.currentPlateIndex < component.plates.length) {
+            spawnComponentPlate(component);
+        } else {
+            if (component.domElements && component.domElements.area) {
+                component.domElements.area.remove();
+            }
+            component.isComplete = true;
+
+            // Spawn the next available component from the queue
+            const nextUnspawned = components.find((c) => !c.isSpawned);
+            if (nextUnspawned) {
+                spawnComponent(nextUnspawned);
+            }
+
+            checkVictory();
+            checkAndReplenishScrews();
+        }
+    }
+}
+
+function spawnComponentPlate(component) {
+    if (component.isComplete || component.currentPlateIndex >= component.plates.length) {
         return;
     }
 
-    const color = weightedRandom(candidateColors, weights);
-    boxPool[color]--;
+    const plate = component.plates[component.currentPlateIndex];
+    if (!component.domElements.area) {
+        const areaDiv = document.createElement('div');
+        areaDiv.className = 'component-area';
+        areaDiv.style.left = component.area.col * 32 + 'px';
+        areaDiv.style.top = component.area.row * 32 + 'px';
+        areaDiv.style.width = component.area.width * 32 + 'px';
+        areaDiv.style.height = component.area.height * 32 + 'px';
+        board.appendChild(areaDiv);
+        component.domElements.area = areaDiv;
 
-    box.dataset.color = color;
-    box.dataset.enabled = 'true';
-    box.classList.add('enabled');
-    box.style.borderColor = color;
-    box.innerHTML = '';
-    usedBoxColors.add(color);
-
-    for (let i = 0; i < 3; i++) {
-        const slot = document.createElement('div');
-        slot.className = 'slot';
-        box.appendChild(slot);
+        const indicatorDiv = document.createElement('div');
+        indicatorDiv.className = 'layer-indicator';
+        areaDiv.appendChild(indicatorDiv);
+        component.domElements.indicator = indicatorDiv;
     }
 
-    const level = evaluateOverallDifficulty();
-    recordDifficulty(level);
+    component.domElements.indicator.textContent = `${component.currentPlateIndex + 1}/${component.plates.length}`;
 
-    absorbTempDots(color, box);
+    // Create plate DOM
+    const area = component.area;
+    const plateOverlay = document.createElement('div');
+    plateOverlay.className = 'plate';
+    plateOverlay.style.backgroundColor = `rgba(${Math.floor(Math.random() * 256)},${Math.floor(Math.random() * 256)},${Math.floor(
+        Math.random() * 256
+    )},0.2)`;
+    plateOverlay.style.left = area.col * 32 + 'px';
+    plateOverlay.style.top = area.row * 32 + 'px';
+    plateOverlay.style.width = area.width * 32 - 2 + 'px';
+    plateOverlay.style.height = area.height * 32 - 2 + 'px';
+    plateOverlay.style.zIndex = 10;
+    board.appendChild(plateOverlay);
+    plate.domElement = plateOverlay;
+
+    const availableCells = [];
+    for (let r = area.row; r < area.row + area.height; r++) {
+        for (let c = area.col; c < area.col + area.width; c++) {
+            if (cellMap[r] && cellMap[r][c] && !cellMap[r][c].dataset.componentId) {
+                availableCells.push(cellMap[r][c]);
+            }
+        }
+    }
+
+    for (let i = availableCells.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availableCells[i], availableCells[j]] = [availableCells[j], availableCells[i]];
+    }
+
+    for (const screw of plate.screws) {
+        const cell = availableCells.pop();
+        if (!cell) {
+            console.error('No available cells in component area for screw');
+            continue;
+        }
+        screw.cell = cell;
+        cell.dataset.plateId = plate.id;
+        cell.dataset.componentId = component.id;
+        const dot = spawnDot(screw, cell);
+        dot.style.zIndex = 20;
+        screw.dot = dot;
+    }
+
+    setupLocks(plate.screws);
     updateInfo();
 }
 
-/**
- * 吸收临时槽位中的匹配螺丝
- * @param {string} color 颜色
- * @param {Element} box 盒子元素
- */
-function absorbTempDots(color, box) {
-    const matchingDots = [];
-    tempSlotsState.forEach((d) => {
-        if (d && d.dataset.color === color) {
-            matchingDots.push(d);
-        }
-    });
+function generateSingleComponent(type, colorPlan) {
+    const config = COMPONENT_CONFIG[type];
+    const newComponent = {
+        id: nextComponentId++,
+        type: type,
+        plates: [],
+        currentPlateIndex: 0,
+        isComplete: false,
+        domElements: {},
+    };
 
-    if (matchingDots.length >= 3) {
-        for (let i = 0; i < 3; i++) {
-            removeDot(matchingDots[i]);
+    // Find a free area
+    const occupiedAreas = components.filter((c) => !c.isComplete).map((c) => c.area);
+    let area;
+    let attempts = 0;
+    do {
+        const width = config.size.width;
+        const height = config.size.height;
+        const row = Math.floor(Math.random() * (ROWS - height));
+        const col = Math.floor(Math.random() * (COLS - width));
+        area = { row, col, width, height };
+        attempts++;
+    } while (isAreaOverlapping(area, occupiedAreas) && attempts < 100);
+
+    if (isAreaOverlapping(area, occupiedAreas)) return null;
+    newComponent.area = area;
+
+    let remainingScrews = colorPlan.length;
+    let layerIndex = 0;
+    while (remainingScrews > 0) {
+        const plateId = `${newComponent.id}-${layerIndex++}`;
+        const numScrewsThisLayer = Math.min(config.screwsPerLayer(), remainingScrews);
+        const screws = [];
+        for (let j = 0; j < numScrewsThisLayer; j++) {
+            const color = colorPlan.shift();
+            screws.push({
+                color,
+                group: newComponent.id,
+                stage: 0,
+                id: nextScrewId++,
+                plateId: plateId,
+                componentId: newComponent.id,
+                cell: null,
+                dot: null,
+                locked: false,
+                controller: null,
+                control: null,
+                controllers: [],
+                overlay: null,
+            });
         }
-        setTimeout(() => {
-            usedBoxColors.delete(color);
-            setupBox(box);
-            showMessage('🎉 自动三消！');
-            setTimeout(() => showMessage(''), 1500);
-            updateInfo();
-            checkVictory();
-        }, 300);
-    } else {
-        for (let dot of matchingDots) {
-            const emptySlot = [...box.children].find((s) => s.className === 'slot' && !s.dataset.filled);
-            if (emptySlot) {
-                const newDot = document.createElement('div');
-                newDot.className = 'slot';
-                cleanupOrphanLocks();
-                newDot.style.backgroundColor = color;
-                newDot.dataset.color = color;
-                newDot.dataset.filled = 'true';
-                emptySlot.replaceWith(newDot);
-                removeDot(dot);
-            }
+
+        if (screws.length > 0) {
+            newComponent.plates.push({ id: plateId, screws });
         }
-        updateInfo();
-        checkVictory();
+        remainingScrews -= numScrewsThisLayer;
+        if (layerIndex > 20) break; // Safety break to prevent infinite loops
     }
-}
-
-/**
- * 计算剩余颜色池总数
- * @returns {number} 剩余螺丝总数
- */
-function totalRemainingPool() {
-    return COLORS.reduce((s, c) => s + colorPool[c], 0);
-}
-
-/**
- * 统计游戏面板上各颜色螺丝数量
- * @returns {Object} 各颜色的数量统计
- */
-function countBoardColors() {
-    const counts = Object.fromEntries(COLORS.map((c) => [c, 0]));
-    for (const plate of activePlates) {
-        for (const screw of plate.screws) {
-            if (screw.dot) counts[screw.color]++;
-        }
-    }
-    return counts;
-}
-
-/**
- * 统计场景中各颜色螺丝总数（包括面板、临时槽和盒子）
- * @returns {Object} 各颜色的总数统计
- */
-function countSceneColors() {
-    const counts = countBoardColors();
-    tempSlotsState.forEach((d) => {
-        if (d) counts[d.dataset.color]++;
-    });
-    boxes.forEach((box) => {
-        [...box.children].forEach((slot) => {
-            if (slot.dataset.filled && slot.dataset.color) {
-                counts[slot.dataset.color]++;
-            }
-        });
-    });
-    return counts;
-}
-
-/**
- * 根据权重随机选择颜色
- * @param {Array} colors 颜色数组
- * @param {Object} weights 权重对象
- * @returns {string} 选中的颜色
- */
-function weightedRandom(colors, weights) {
-    const total = colors.reduce((s, c) => s + weights[c], 0);
-    let r = Math.random() * total;
-    for (const c of colors) {
-        r -= weights[c];
-        if (r <= 0) return c;
-    }
-    return colors[colors.length - 1];
+    return newComponent;
 }
 
 /**
@@ -1114,24 +1140,21 @@ function handleDotClick(dot) {
             newDot.style.backgroundColor = color;
             newDot.dataset.color = color;
             newDot.dataset.filled = 'true';
+            newDot.dataset.sid = screw.id;
             emptySlot.replaceWith(newDot);
             dot.remove();
-            checkPlateRemoval(fromCell);
-            // 记录本次拔出的格子，供生成算法使用
+
+            if (screw) {
+                const component = components.find((c) => c.id === screw.componentId);
+                if (component) checkPlateCompletion(component);
+            }
             lastRemovedCell = fromCell;
             updateInfo();
             checkVictory();
+            checkAndReplenishScrews();
 
-            const filled = [...box.children].filter((s) => s.dataset.color === color).length;
-            if (filled === 3) {
-                setTimeout(() => {
-                    usedBoxColors.delete(box.dataset.color);
-                    setupBox(box);
-                    showMessage('🎉 三消成功！');
-                    setTimeout(() => showMessage(''), 1500);
-                    updateInfo();
-                    checkVictory();
-                }, 10);
+            if (checkAndProcessBoxMatch(box)) {
+                return;
             }
             return;
         }
@@ -1148,13 +1171,17 @@ function handleDotClick(dot) {
         tempSlotsState[emptyIndex] = dot;
         renderTempSlots();
         dot.style.position = 'absolute';
-        // 记录本次拔出的格子，供生成算法使用
+
+        if (screw) {
+            const component = components.find((c) => c.id === screw.componentId);
+            if (component) checkPlateCompletion(component);
+        }
+
         lastRemovedCell = fromCell;
-        checkPlateRemoval(fromCell);
         updateInfo();
         checkVictory();
-        // checkClickDot();
         checkTempSlotLimit();
+        checkAndReplenishScrews();
         return;
     }
 
@@ -1193,10 +1220,15 @@ function initBoxes() {
             hint.textContent = '点击开启';
             box.appendChild(hint);
             box.style.borderColor = '#ccc';
-            box.addEventListener('click', () => {
-                setupBox(box, true);
-                box.querySelector('.hint') && box.querySelector('.hint').remove();
-            });
+            box.addEventListener(
+                'click',
+                () => {
+                    setupBox(box, true); // Pass true for isHint/isManualAdd
+                    const hintElement = box.querySelector('.hint');
+                    if (hintElement) hintElement.remove();
+                },
+                { once: true }
+            ); // Ensure this only fires once
         }
     });
 }
@@ -1226,42 +1258,68 @@ function showMessage(msg) {
     message.textContent = msg;
 }
 
-/**
- * 评估指定颜色的难度
- * @param {string} color 颜色
- * @returns {number} 难度级别（1-3）
- */
-function evaluateDifficultyForColor(color) {
-    const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
-    const accessible = dots.filter((d) => d.dataset.blocked === 'false').length;
-    const blocked = dots.length - accessible;
-
-    let inBoxes = 0;
-    boxes.forEach((box) => {
-        [...box.children].forEach((slot) => {
-            if (slot.dataset.filled && slot.dataset.color === color) inBoxes++;
-        });
+// New helper function to get detailed stats for all colors
+function getColorStats() {
+    const stats = {};
+    COLORS.forEach((c) => {
+        stats[c] = {
+            onBoardUnlocked: 0,
+            onBoardLocked: 0,
+            inTemp: 0,
+            inBox: 0,
+            unspawned: 0,
+            total: 0,
+        };
     });
 
-    const inTemps = tempSlotsState.filter((d) => d && d.dataset.color === color).length;
+    const tempScrewIds = new Set(tempSlotsState.filter((d) => d).map((d) => String(d.dataset.sid)));
+    const boxScrewIds = new Set();
+    document.querySelectorAll('.box .slot[data-sid]').forEach((s) => boxScrewIds.add(String(s.dataset.sid)));
 
-    const accessibleTotal = accessible + inBoxes + inTemps;
-    const availableTotal = accessibleTotal + blocked;
+    for (const id in screwMap) {
+        const screw = screwMap[id];
+        const s = stats[screw.color];
+        if (!s || eliminatedScrewIds.has(id)) {
+            continue;
+        }
 
-    if (accessibleTotal >= 3) return 1; // 简单
-    if (availableTotal >= 3) return 2; // 中等
-    return 3; // 困难
+        s.total++;
+
+        if (screw.dot) {
+            if (screw.locked) {
+                s.onBoardLocked++;
+            } else {
+                s.onBoardUnlocked++;
+            }
+        } else if (tempScrewIds.has(id)) {
+            s.inTemp++;
+        } else if (boxScrewIds.has(id)) {
+            s.inBox++;
+        } else {
+            s.unspawned++;
+        }
+    }
+    return stats;
 }
 
-/**
- * 评估整体难度
- * @returns {number} 整体难度级别
- */
+function evaluateDifficultyForColor(color, allColorStats) {
+    const stats = allColorStats[color];
+    if (!stats) return 3; // Hard if no stats
+
+    const accessibleTotal = stats.onBoardUnlocked + stats.inTemp;
+    const availableTotal = accessibleTotal + stats.onBoardLocked + stats.unspawned + stats.inBox;
+
+    if (accessibleTotal >= 3) return 1; // Easy
+    if (availableTotal >= 3) return 2; // Medium
+    return 3; // Hard
+}
+
 function evaluateOverallDifficulty() {
     let minLevel = 3;
+    const allColorStats = getColorStats(); // Calculate once
     boxes.forEach((box) => {
         if (box.dataset.enabled === 'true') {
-            const lvl = evaluateDifficultyForColor(box.dataset.color);
+            const lvl = evaluateDifficultyForColor(box.dataset.color, allColorStats);
             if (lvl < minLevel) minLevel = lvl;
         }
     });
@@ -1329,28 +1387,60 @@ function recordDifficulty(level) {
  * 更新游戏信息面板
  */
 function updateInfo() {
+    const stats = {
+        onBoard: Object.fromEntries(COLORS.map((c) => [c, 0])),
+        inTemp: Object.fromEntries(COLORS.map((c) => [c, 0])),
+        inBox: Object.fromEntries(COLORS.map((c) => [c, 0])),
+        eliminated: Object.fromEntries(COLORS.map((c) => [c, 0])),
+        unspawned: Object.fromEntries(COLORS.map((c) => [c, 0])),
+    };
+
+    const tempScrewIds = new Set(tempSlotsState.filter((d) => d).map((d) => String(d.dataset.sid)));
+    const boxScrewIds = new Set();
+    document.querySelectorAll('.box .slot[data-sid]').forEach((s) => boxScrewIds.add(String(s.dataset.sid)));
+
+    for (const id in screwMap) {
+        const screw = screwMap[id];
+        if (eliminatedScrewIds.has(id)) {
+            stats.eliminated[screw.color]++;
+        } else if (screw.dot) {
+            stats.onBoard[screw.color]++;
+        } else if (tempScrewIds.has(id)) {
+            stats.inTemp[screw.color]++;
+        } else if (boxScrewIds.has(id)) {
+            stats.inBox[screw.color]++;
+        } else {
+            stats.unspawned[screw.color]++;
+        }
+    }
+
+    const onBoardTotal = Object.values(stats.onBoard).reduce((a, b) => a + b, 0);
+    const inTempTotal = Object.values(stats.inTemp).reduce((a, b) => a + b, 0);
+    const inBoxTotal = Object.values(stats.inBox).reduce((a, b) => a + b, 0);
+    const eliminatedTotal = Object.values(stats.eliminated).reduce((a, b) => a + b, 0);
+    const unspawnedTotal = Object.values(stats.unspawned).reduce((a, b) => a + b, 0);
+
+    const remainingTotal = onBoardTotal + inTempTotal + inBoxTotal + unspawnedTotal;
+    const onBoardColors = Object.keys(stats.onBoard).filter((c) => stats.onBoard[c] > 0).length;
+
+    const boxesInQueue = Object.fromEntries(COLORS.map((c) => [c, 0]));
+    for (const color of boxColorQueue) {
+        boxesInQueue[color]++;
+    }
+
     totalCountEl.textContent = TOTAL_SCREWS;
-    const queue = totalRemainingPool();
-    const boardCounts = countBoardColors();
-    const onBoard = Object.values(boardCounts).reduce((a, b) => a + b, 0);
-    const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter((el) => el.dataset.filled).length, 0);
-    const tempDots = tempSlotsState.filter((d) => d).length;
-    const remaining = queue + boxDots + tempDots + onBoard;
-    const eliminated = TOTAL_SCREWS - remaining;
-    remainingCountEl.textContent = remaining;
-    eliminatedCountEl.textContent = eliminated;
-    progressCountEl.textContent = ((eliminated / TOTAL_SCREWS) * 100).toFixed(2) + '%';
-    onboardCountEl.textContent = onBoard;
-    queueCountEl.textContent = queue;
-    onboardColorCountEl.textContent = Object.keys(boardCounts).length;
-    const dots = document.querySelectorAll('#game-board .dot');
-    const colors = new Set();
-    dots.forEach((d) => colors.add(d.dataset.color));
-    colorCountEl.textContent = colors.size;
+    remainingCountEl.textContent = remainingTotal;
+    eliminatedCountEl.textContent = eliminatedTotal;
+    progressCountEl.textContent = TOTAL_SCREWS > 0 ? ((eliminatedTotal / TOTAL_SCREWS) * 100).toFixed(2) + '%' : '0.00%';
+    onboardCountEl.textContent = onBoardTotal;
+    queueCountEl.textContent = inTempTotal + inBoxTotal;
+    onboardColorCountEl.textContent = onBoardColors;
+    colorCountEl.textContent = onBoardColors;
+
     colorStats.innerHTML = COLORS.map((c) => {
-        const screws = colorPool[c] + boardCounts[c];
-        const boxesCreated = COLOR_BOX_TOTALS[c] - boxPool[c];
-        return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screws}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
+        const screwsInPlay = stats.onBoard[c] + stats.inTemp[c] + stats.inBox[c] + stats.unspawned[c];
+        const boxesCreated = COLOR_BOX_TOTALS[c] - boxesInQueue[c];
+        return `<div style="color:${c}">${COLOR_NAMES[c]}螺丝:<span>${screwsInPlay}</span>/${COLOR_TOTALS[c]} 盒子:<span>${boxesCreated}</span>/${COLOR_BOX_TOTALS[c]}</div>`;
     }).join('');
 }
 
@@ -1391,17 +1481,11 @@ function checkVictory() {
     const boxDots = [...boxes].reduce((s, b) => s + [...b.children].filter((el) => el.dataset.filled).length, 0);
     const tempDots = tempSlotsState.filter((d) => d).length;
 
-    if (activePlates.length === 0) {
-        resetBoxes();
-        initTempSlots();
+    const allComponentsComplete = components.every((c) => c.isComplete);
+    if (allComponentsComplete && boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
         showMessage('🏆 游戏胜利！');
         disableGame();
         return;
-    }
-
-    if (boardDots === 0 && boxDots === 0 && tempDots === 0 && totalRemainingPool() === 0) {
-        showMessage('🏆 游戏胜利！');
-        disableGame();
     }
 }
 
@@ -1506,13 +1590,11 @@ function startGame() {
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
 
-        // Apply settings
         TOTAL_BOXES = settings.boxes;
         COLORS = ALL_COLORS.slice(0, Math.min(settings.colors, ALL_COLORS.length));
         MAX_TEMP_SLOTS = settings.tempSlots;
         MAX_LOCK_GROUPS = settings.maxLockGroups;
         MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
-        MAX_VISIBLE_PLATES = settings.maxVisiblePlates;
     } else {
         TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
         const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
@@ -1520,37 +1602,113 @@ function startGame() {
         COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
     }
 
-    TOTAL_SCREWS = TOTAL_BOXES * 3;
-    const screwColorPlan = planColorDistribution(TOTAL_BOXES, COLORS);
+    hintMessageShown = false; // Reset hint message flag for new game
 
+    // Setup global color tiers based on the current level's colors
+    colorTiers.tier1 = COLORS.slice(0, 4);
+    colorTiers.tier2 = COLORS.slice(4, 7);
+    colorTiers.tier3 = COLORS.slice(7);
+
+    const localBoxColorPlan = planBoxes(TOTAL_BOXES, COLORS);
+    boxColorQueue = [...localBoxColorPlan];
+    const screwColorPlan = planColorDistribution(localBoxColorPlan, COLORS);
+    TOTAL_SCREWS = screwColorPlan.length;
+
+    console.log(screwColorPlan);
+    console.log(TOTAL_SCREWS);
+
+    // Clear board and state
     board.innerHTML = '<svg id="line-layer"></svg>';
     lineLayer = document.getElementById('line-layer');
     cellMap.length = 0;
-    activeCells = [];
-    plates = [];
-    activePlates = [];
     lockConnections = [];
     usedBoxColors.clear();
+    eliminatedScrewIds.clear();
     tempSlotsState = [];
-    nextPlateIndex = 0;
     nextScrewId = 0;
     for (const k in screwMap) delete screwMap[k];
+    components = [];
+    nextComponentId = 0;
 
+    // Setup game
     createGrid();
-    activateCells();
     initTempSlots();
-    generateBoardData(screwColorPlan);
+    generateComponents(screwColorPlan);
     initPools();
     initBoardState();
-    for (let i = 0; i < MAX_VISIBLE_PLATES; i++) {
-        spawnNextPlate();
+
+    // Spawn initial components
+    const initialLarge = 1;
+    const initialMedium = components.filter((c) => c.type === 'MEDIUM' && !c.isSpawned).length;
+    // Spawn a few small ones to ensure enough starting elements
+    const initialSmall = 3 + Math.floor(Math.random() * 3); // 3-5 small components
+
+    let spawnedCount = 0;
+
+    // Spawn Large
+    for (const comp of components) {
+        if (comp.type === 'LARGE' && spawnComponent(comp)) {
+            spawnedCount++;
+            break; // Should only be one
+        }
     }
+
+    // Spawn Medium
+    let spawnedMedium = 0;
+    for (const comp of components) {
+        if (spawnedMedium >= initialMedium) break;
+        if (comp.type === 'MEDIUM' && spawnComponent(comp)) {
+            spawnedMedium++;
+            spawnedCount++;
+        }
+    }
+
+    // Spawn Small
+    let spawnedSmall = 0;
+    for (const comp of components) {
+        if (spawnedSmall >= initialSmall) break;
+        if (comp.type === 'SMALL' && spawnComponent(comp)) {
+            spawnedSmall++;
+            spawnedCount++;
+        }
+    }
+
+    // NEW: Intelligent initial box setup
     resetBoxes();
+
+    // 1. Get total counts of all screws for each color (spawned or not)
+    const totalColorCounts = Object.fromEntries(COLORS.map((c) => [c, 0]));
+    for (const id in screwMap) {
+        if (!eliminatedScrewIds.has(id)) {
+            totalColorCounts[screwMap[id].color]++;
+        }
+    }
+
+    // 2. Filter for colors that have at least 3 screws in total (ensuring they are solvable)
+    const solvableColors = Object.keys(totalColorCounts).filter((c) => totalColorCounts[c] >= 3);
+
+    // 3. Of the solvable colors, find their current counts on the board to prioritize
+    const initialBoardColors = countBoardColors();
+    const sortedSolvableColors = solvableColors.sort((a, b) => {
+        const countA = initialBoardColors[a] || 0;
+        const countB = initialBoardColors[b] || 0;
+        return countB - countA;
+    });
+
+    // 4. Override the start of the queue with these prioritized, solvable colors
+    for (let i = 0; i < sortedSolvableColors.length; i++) {
+        const color = sortedSolvableColors[i];
+        const indexInQueue = boxColorQueue.indexOf(color);
+        if (indexInQueue !== -1) {
+            boxColorQueue.splice(indexInQueue, 1);
+            boxColorQueue.unshift(color);
+        }
+    }
+
     difficultyHistory = [];
     drawDifficultyChart();
     if (currentDifficultyEl) currentDifficultyEl.textContent = '-';
     initBoxes();
-    setupLocks();
     updateInfo();
     showMessage('');
 }
@@ -1616,3 +1774,282 @@ addTempSlotBtn.addEventListener('click', () => {
 createDifficultyButtons();
 updateInputsWithDifficulty(selectedDifficulty);
 startGame();
+
+function weightedRandom(colors, weights) {
+    const total = colors.reduce((s, c) => s + (weights[c] || 0), 0);
+    let r = Math.random() * total;
+    for (const c of colors) {
+        if (weights[c]) {
+            r -= weights[c];
+            if (r <= 0) return c;
+        }
+    }
+    const validColors = colors.filter((c) => weights[c] > 0);
+    return validColors.length > 0 ? validColors[validColors.length - 1] : colors[colors.length - 1];
+}
+
+function setupBox(box, isManualAdd = false) {
+    if (boxColorQueue.length === 0) {
+        box.dataset.enabled = 'false';
+        box.classList.remove('enabled');
+        box.style.borderColor = '#ccc';
+        box.innerHTML = '<div class="hint">无</div>';
+        return;
+    }
+
+    const progress = getProgress();
+    const allColorStats = getColorStats();
+    let bestColorIndex = -1;
+
+    if (progress < 0.5) {
+        // Early Game: Be helpful
+        const solvableColors = boxColorQueue.filter((c) => {
+            const stats = allColorStats[c];
+            return stats && stats.onBoardUnlocked + stats.inTemp >= 3;
+        });
+        if (solvableColors.length > 0) {
+            bestColorIndex = boxColorQueue.findIndex((c) => solvableColors.includes(c) && !usedBoxColors.has(c));
+            if (bestColorIndex === -1) {
+                // All solvable are active, just take the first solvable
+                bestColorIndex = boxColorQueue.findIndex((c) => solvableColors.includes(c));
+            }
+        }
+    } else {
+        // Mid-Late Game: Be challenging
+        const chokePointColors = boxColorQueue.filter((c) => {
+            const stats = allColorStats[c];
+            return stats && stats.onBoardLocked > 0;
+        });
+        if (chokePointColors.length > 0) {
+            bestColorIndex = boxColorQueue.findIndex((c) => chokePointColors.includes(c) && !usedBoxColors.has(c));
+            if (bestColorIndex === -1) {
+                // All chokepoints are active, just take the first chokepoint
+                bestColorIndex = boxColorQueue.findIndex((c) => chokePointColors.includes(c));
+            }
+        }
+    }
+
+    // Fallback logic if no strategic color was found
+    if (bestColorIndex === -1) {
+        if (isManualAdd) {
+            const tempSlotColors = tempSlotsState.filter((d) => d).map((d) => d.dataset.color);
+            if (tempSlotColors.length > 0) {
+                bestColorIndex = boxColorQueue.findIndex((c) => tempSlotColors.includes(c) && !usedBoxColors.has(c));
+                if (bestColorIndex === -1) {
+                    bestColorIndex = boxColorQueue.findIndex((c) => tempSlotColors.includes(c));
+                }
+            }
+        }
+        if (bestColorIndex === -1) {
+            const onBoardScrewColors = countBoardColors();
+            const availableOnBoard = Object.keys(onBoardScrewColors).filter((c) => onBoardScrewColors[c] > 0);
+            bestColorIndex = boxColorQueue.findIndex((c) => availableOnBoard.includes(c) && !usedBoxColors.has(c));
+            if (bestColorIndex === -1) {
+                bestColorIndex = boxColorQueue.findIndex((c) => availableOnBoard.includes(c));
+            }
+        }
+        if (bestColorIndex === -1) {
+            bestColorIndex = boxColorQueue.findIndex((c) => !usedBoxColors.has(c));
+        }
+        if (bestColorIndex === -1) {
+            bestColorIndex = 0;
+        }
+    }
+
+    if (boxColorQueue.length === 0) return; // Should be captured above, but for safety
+    if (bestColorIndex < 0 || bestColorIndex >= boxColorQueue.length) {
+        bestColorIndex = 0;
+    }
+
+    const color = boxColorQueue.splice(bestColorIndex, 1)[0];
+
+    box.dataset.color = color;
+    box.dataset.enabled = 'true';
+    box.classList.add('enabled');
+    box.style.borderColor = color;
+    box.innerHTML = '';
+    usedBoxColors.add(color);
+
+    for (let i = 0; i < 3; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'slot';
+        box.appendChild(slot);
+    }
+
+    const level = evaluateOverallDifficulty();
+    recordDifficulty(level);
+
+    absorbTempDots(color, box);
+    updateInfo();
+}
+
+function absorbTempDots(color, box) {
+    const matchingDots = [];
+    tempSlotsState.forEach((d, i) => {
+        if (d && d.dataset.color === color) {
+            matchingDots.push({ dot: d, index: i });
+        }
+    });
+
+    for (const item of matchingDots) {
+        const emptySlot = [...box.children].find((s) => s.className === 'slot' && !s.dataset.filled);
+        if (emptySlot) {
+            // Move dot from temp to box
+            tempSlotsState[item.index] = null;
+
+            const newDot = document.createElement('div');
+            newDot.className = 'slot';
+            newDot.style.backgroundColor = color;
+            newDot.dataset.color = color;
+            newDot.dataset.filled = 'true';
+            newDot.dataset.sid = item.dot.dataset.sid;
+            emptySlot.replaceWith(newDot);
+            item.dot.remove();
+        } else {
+            break; // Box is full
+        }
+    }
+    renderTempSlots();
+
+    if (checkAndProcessBoxMatch(box)) {
+        // Match was processed
+    } else {
+        updateInfo();
+        checkVictory();
+        checkAndReplenishScrews();
+    }
+}
+
+function checkAndProcessBoxMatch(box) {
+    if (!box || !box.dataset.color) return false;
+
+    const color = box.dataset.color;
+    const filledSlots = [...box.children].filter((s) => s.dataset.filled === 'true');
+
+    if (filledSlots.length === 3) {
+        setTimeout(() => {
+            filledSlots.forEach((slot) => {
+                if (slot.dataset.sid) {
+                    eliminatedScrewIds.add(slot.dataset.sid);
+                }
+            });
+
+            usedBoxColors.delete(color);
+            setupBox(box);
+            showMessage('🎉 三消成功！');
+            setTimeout(() => showMessage(''), 1500);
+            updateInfo();
+            checkVictory();
+        }, 100);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 计算剩余颜色池总数
+ * @returns {number} 剩余螺丝总数
+ */
+function totalRemainingPool() {
+    return COLORS.reduce((s, c) => s + (colorPool[c] || 0), 0);
+}
+
+/**
+ * 统计游戏面板上各颜色螺丝数量
+ * @returns {Object} 各颜色的数量统计
+ */
+function countBoardColors() {
+    const counts = Object.fromEntries(COLORS.map((c) => [c, 0]));
+    if (!components) return counts;
+
+    for (const component of components) {
+        if (component.isComplete) continue;
+
+        const currentPlate = component.plates[component.currentPlateIndex];
+        if (!currentPlate) continue;
+
+        for (const screw of currentPlate.screws) {
+            if (screw.dot && counts[screw.color] !== undefined) {
+                counts[screw.color]++;
+            }
+        }
+    }
+    return counts;
+}
+
+function spawnComponent(component) {
+    if (!component || component.isSpawned) return false;
+
+    // Build the current occupied grid on-the-fly
+    const occupiedGrid = Array(ROWS)
+        .fill(null)
+        .map(() => Array(COLS).fill(false));
+    for (const c of components) {
+        if (c.isSpawned && c.area) {
+            for (let r = c.area.row; r < c.area.row + c.area.height; r++) {
+                for (let col = c.area.col; col < c.area.col + c.area.width; col++) {
+                    if (r < ROWS && col < COLS) occupiedGrid[r][col] = true;
+                }
+            }
+        }
+    }
+
+    const config = COMPONENT_CONFIG[component.type];
+    let foundSpot = false;
+    let area;
+
+    // Deterministic scan to find a spot
+    for (let r = 0; r <= ROWS - config.size.height; r++) {
+        for (let c = 0; c <= COLS - config.size.width; c++) {
+            let canPlace = true;
+            for (let y = r; y < r + config.size.height; y++) {
+                for (let x = c; x < c + config.size.width; x++) {
+                    if (y >= ROWS || x >= COLS || occupiedGrid[y][x]) {
+                        canPlace = false;
+                        break;
+                    }
+                }
+                if (!canPlace) break;
+            }
+            if (canPlace) {
+                area = { row: r, col: c, width: config.size.width, height: config.size.height };
+                foundSpot = true;
+                break;
+            }
+        }
+        if (foundSpot) break;
+    }
+
+    if (foundSpot) {
+        component.area = area;
+        component.isSpawned = true;
+        spawnComponentPlate(component);
+        return true;
+    } else {
+        console.warn('Could not find a spot to spawn new component.', { componentId: component.id });
+        return false;
+    }
+}
+
+function checkAndReplenishScrews() {
+    const minOnboard = parseInt(document.getElementById('min-onboard-screws').value, 10) || 15;
+    let currentOnBoard = Object.values(countBoardColors()).reduce((a, b) => a + b, 0);
+
+    let safetyBreak = 0;
+    while (currentOnBoard < minOnboard && safetyBreak < 20) {
+        const nextUnspawned = components.find((c) => !c.isSpawned && c.type === 'SMALL');
+        if (nextUnspawned) {
+            if (spawnComponent(nextUnspawned)) {
+                // Recalculate current number of screws after spawning
+                currentOnBoard = Object.values(countBoardColors()).reduce((a, b) => a + b, 0);
+            } else {
+                // Could not spawn, probably board is full, break the loop
+                break;
+            }
+        } else {
+            // No more unspawned small components left to replenish
+            break;
+        }
+        safetyBreak++;
+    }
+}

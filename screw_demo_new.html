@@ -226,6 +226,26 @@
             border: 1px solid #ccc;
         }
 
+        .component-area {
+            position: absolute;
+            pointer-events: none;
+            border: 1px dashed rgba(0, 0, 0, 0.2);
+            z-index: 1;
+        }
+
+        .layer-indicator {
+            position: absolute;
+            top: -18px;
+            left: 0;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 2px 5px;
+            font-size: 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            pointer-events: auto;
+        }
+
         #difficulty-buttons {
             display: flex;
             flex-wrap: wrap;
@@ -264,7 +284,12 @@
             <label>螺丝颜色数:<input id="color-count-input" type="number" value="7" min="1" max="10"></label>
         </div>
         <div>
-            <label>临时孔位数量:<input id="temp-count" type="number" value="5" min="1"></label>
+            <label for="temp-count">临时槽:</label>
+            <input type="number" id="temp-count" value="5" min="1" max="10">
+        </div>
+        <div>
+            <label for="min-onboard-screws">场上最少螺丝:</label>
+            <input type="number" id="min-onboard-screws" value="15" min="5" max="50">
         </div>
         <div>
             <label>难度选择:</label>
