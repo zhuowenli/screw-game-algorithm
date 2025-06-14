@@ -589,6 +589,27 @@ function cleanupOrphanLocks() {
         lockConnections = lockConnections.filter((c) => !mutual.has(c));
     }
 
+    // NEW: Find and break longer cycles (e.g., A -> B -> C -> A)
+    for (const conn of lockConnections) {
+        let current = conn.controller;
+        let depth = 0;
+        while (current) {
+            if (current === conn.locked) {
+                // Cycle detected!
+                console.warn(`检测到锁循环并自动断开: ${conn.controller.id} -> ${conn.locked.id}`);
+                // removeConnection will call cleanupOrphanLocks again, so we just call it and exit.
+                removeConnection(conn);
+                return; // Exit and let the new cleanup run on the modified state.
+            }
+            current = current.controller;
+            depth++;
+            if (depth > 50) {
+                // Safety break
+                break;
+            }
+        }
+    }
+
     const connectedControllers = new Set();
     const connectedLocked = new Set();
     lockConnections.forEach((conn) => {
@@ -1306,8 +1327,8 @@ function evaluateDifficultyForColor(color, allColorStats) {
     const stats = allColorStats[color];
     if (!stats) return 3; // Hard if no stats
 
-    const accessibleTotal = stats.onBoardUnlocked + stats.inTemp;
-    const availableTotal = accessibleTotal + stats.onBoardLocked + stats.unspawned + stats.inBox;
+    const accessibleTotal = stats.onBoardUnlocked + stats.inTemp + stats.inBox;
+    const availableTotal = accessibleTotal + stats.onBoardLocked;
 
     if (accessibleTotal >= 3) return 1; // Easy
     if (availableTotal >= 3) return 2; // Medium
@@ -1789,6 +1810,19 @@ function weightedRandom(colors, weights) {
 }
 
 function setupBox(box, isManualAdd = false) {
+    const allColorStats = getColorStats();
+
+    // 1. Permanent Purge: Remove boxes for colors that are completely extinct from the game.
+    const originalQueueCount = boxColorQueue.length;
+    boxColorQueue = boxColorQueue.filter((color) => {
+        const stats = allColorStats[color];
+        return stats && stats.total > 0;
+    });
+
+    if (boxColorQueue.length < originalQueueCount) {
+        console.log(`队列净化：永久移除了 ${originalQueueCount - boxColorQueue.length} 个已耗尽颜色的盒子。`);
+    }
+
     if (boxColorQueue.length === 0) {
         box.dataset.enabled = 'false';
         box.classList.remove('enabled');
@@ -1797,71 +1831,89 @@ function setupBox(box, isManualAdd = false) {
         return;
     }
 
-    const progress = getProgress();
-    const allColorStats = getColorStats();
-    let bestColorIndex = -1;
+    // 2. Dynamic Candidate Pool: A color is only a candidate if its screws are ON THE BOARD now.
+    const onBoardScrewStats = countBoardColors();
+    const onBoardColors = new Set(Object.keys(onBoardScrewStats).filter((c) => onBoardScrewStats[c] > 0));
 
-    if (progress < 0.5) {
-        // Early Game: Be helpful
-        const solvableColors = boxColorQueue.filter((c) => {
+    let turnCandidates = boxColorQueue.filter((c) => onBoardColors.has(c));
+
+    // Fallback: If no on-board screw colors are in the queue, the game could get stuck.
+    // In this case, use the entire (purged) queue as candidates to prevent a deadlock.
+    if (turnCandidates.length === 0) {
+        turnCandidates = [...boxColorQueue]; // Use a copy
+        if (boxColorQueue.length > 0) {
+            console.warn('场上无螺丝颜色匹配盒子队列，使用完整队列作为候选以避免卡关。');
+        }
+    }
+
+    if (turnCandidates.length === 0) {
+        // This can happen if the queue is now empty after filtering.
+        box.dataset.enabled = 'false';
+        box.classList.remove('enabled');
+        box.style.borderColor = '#ccc';
+        box.innerHTML = '<div class="hint">无</div>';
+        return;
+    }
+
+    // 3. Prioritized Selection: Choose the best color from the dynamic candidates.
+    const progress = getProgress();
+    let bestColor = null;
+
+    let strategicColors = [];
+    if (isManualAdd) {
+        const tempSlotColors = tempSlotsState.filter((d) => d).map((d) => d.dataset.color);
+        strategicColors = [...new Set(tempSlotColors)].filter((c) => turnCandidates.includes(c));
+    } else if (progress < 0.5) {
+        // Early Game: Helpful colors
+        strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
             return stats && stats.onBoardUnlocked + stats.inTemp >= 3;
         });
-        if (solvableColors.length > 0) {
-            bestColorIndex = boxColorQueue.findIndex((c) => solvableColors.includes(c) && !usedBoxColors.has(c));
-            if (bestColorIndex === -1) {
-                // All solvable are active, just take the first solvable
-                bestColorIndex = boxColorQueue.findIndex((c) => solvableColors.includes(c));
-            }
-        }
     } else {
-        // Mid-Late Game: Be challenging
-        const chokePointColors = boxColorQueue.filter((c) => {
+        // Late Game: Challenging colors
+        strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
             return stats && stats.onBoardLocked > 0;
         });
-        if (chokePointColors.length > 0) {
-            bestColorIndex = boxColorQueue.findIndex((c) => chokePointColors.includes(c) && !usedBoxColors.has(c));
-            if (bestColorIndex === -1) {
-                // All chokepoints are active, just take the first chokepoint
-                bestColorIndex = boxColorQueue.findIndex((c) => chokePointColors.includes(c));
-            }
-        }
     }
 
-    // Fallback logic if no strategic color was found
-    if (bestColorIndex === -1) {
-        if (isManualAdd) {
-            const tempSlotColors = tempSlotsState.filter((d) => d).map((d) => d.dataset.color);
-            if (tempSlotColors.length > 0) {
-                bestColorIndex = boxColorQueue.findIndex((c) => tempSlotColors.includes(c) && !usedBoxColors.has(c));
-                if (bestColorIndex === -1) {
-                    bestColorIndex = boxColorQueue.findIndex((c) => tempSlotColors.includes(c));
-                }
-            }
-        }
-        if (bestColorIndex === -1) {
-            const onBoardScrewColors = countBoardColors();
-            const availableOnBoard = Object.keys(onBoardScrewColors).filter((c) => onBoardScrewColors[c] > 0);
-            bestColorIndex = boxColorQueue.findIndex((c) => availableOnBoard.includes(c) && !usedBoxColors.has(c));
-            if (bestColorIndex === -1) {
-                bestColorIndex = boxColorQueue.findIndex((c) => availableOnBoard.includes(c));
-            }
-        }
-        if (bestColorIndex === -1) {
-            bestColorIndex = boxColorQueue.findIndex((c) => !usedBoxColors.has(c));
-        }
-        if (bestColorIndex === -1) {
-            bestColorIndex = 0;
-        }
+    // Priority 1: A strategic color that is not a duplicate on the board.
+    const p1 = strategicColors.find((c) => !usedBoxColors.has(c));
+    if (p1) bestColor = p1;
+
+    // Priority 2: Any color that is not a duplicate.
+    if (!bestColor) {
+        const p2 = turnCandidates.find((c) => !usedBoxColors.has(c));
+        if (p2) bestColor = p2;
     }
 
-    if (boxColorQueue.length === 0) return; // Should be captured above, but for safety
-    if (bestColorIndex < 0 || bestColorIndex >= boxColorQueue.length) {
-        bestColorIndex = 0;
+    // Priority 3: A strategic color that IS a duplicate (forced choice).
+    if (!bestColor) {
+        if (strategicColors.length > 0) bestColor = strategicColors[0];
     }
 
-    const color = boxColorQueue.splice(bestColorIndex, 1)[0];
+    // Priority 4: Ultimate fallback, just take the first available candidate.
+    if (!bestColor) {
+        bestColor = turnCandidates[0];
+    }
+
+    // 4. Final Processing
+    const indexInMainQueue = boxColorQueue.indexOf(bestColor);
+    if (indexInMainQueue === -1) {
+        // This is a logic error, but handle it gracefully. The box will appear empty.
+        console.error('逻辑错误：选择的颜色不在主队列中。', {
+            bestColor: bestColor,
+            turnCandidates: turnCandidates,
+            mainQueue: boxColorQueue,
+        });
+        box.dataset.enabled = 'false';
+        box.classList.remove('enabled');
+        box.style.borderColor = '#ccc';
+        box.innerHTML = '<div class="hint">错误</div>';
+        return;
+    }
+
+    const color = boxColorQueue.splice(indexInMainQueue, 1)[0];
 
     box.dataset.color = color;
     box.dataset.enabled = 'true';
@@ -2026,7 +2078,7 @@ function spawnComponent(component) {
         spawnComponentPlate(component);
         return true;
     } else {
-        console.warn('Could not find a spot to spawn new component.', { componentId: component.id });
+        console.warn('找不到产生新组件的位置。', { componentId: component.id });
         return false;
     }
 }
@@ -2037,7 +2089,7 @@ function checkAndReplenishScrews() {
 
     let safetyBreak = 0;
     while (currentOnBoard < minOnboard && safetyBreak < 20) {
-        const nextUnspawned = components.find((c) => !c.isSpawned && c.type === 'SMALL');
+        const nextUnspawned = components.find((c) => !c.isSpawned);
         if (nextUnspawned) {
             if (spawnComponent(nextUnspawned)) {
                 // Recalculate current number of screws after spawning
