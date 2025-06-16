@@ -11,7 +11,6 @@ const gameConfig = {
     // --- 核心玩法 (Core Gameplay) ---
     MAX_TEMP_SLOTS: 5, // 初始临时槽位数量
     MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
-    MAX_CONTROLLERS_PER_LOCK: 5, // 单个锁最多能控制的螺丝数量
     MAX_LOCK_GROUPS: 8, // 同一时间场上最多存在的锁定组数量
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     MAX_CONTROLLERS: 4, // 最大并联锁数量
@@ -99,7 +98,6 @@ let MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
 const MAX_CHAIN_LENGTH = gameConfig.MAX_CHAIN_LENGTH;
 let MAX_LOCK_GROUPS = gameConfig.MAX_LOCK_GROUPS;
 let MAX_CONTROLLERS = gameConfig.MAX_CONTROLLERS;
-let MAX_CONTROLLERS_PER_LOCK = gameConfig.MAX_CONTROLLERS_PER_LOCK;
 let MAX_TEMP_SLOTS = gameConfig.MAX_TEMP_SLOTS;
 // 记录最近一次拔出螺丝的格子
 let lastRemovedCell = null;
@@ -976,9 +974,7 @@ function setupLocks(newScrews) {
     // NEW: Get all screws on board to act as potential controllers
     const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
 
-    // --- “卡点颜色”锁定继承逻辑 (已根据最新需求优化) ---
-    // 目标：如果场上存在一个未满的盒子（比如蓝色），那么任何新生成的对应颜色（蓝色）的螺丝，
-    // 都应该被自动锁定，以防止玩家通过刷板块来轻松完成三消。
+    // [REFACTORED] "卡点颜色"逻辑现在被整合进主循环，这里只获取需要优先锁定的颜色集合
     const needyColors = new Set();
     document.querySelectorAll('.box[data-enabled="true"]').forEach((box) => {
         const filledSlots = box.querySelectorAll('.slot[data-filled="true"]').length;
@@ -988,23 +984,8 @@ function setupLocks(newScrews) {
     });
 
     if (needyColors.size > 0) {
-        console.warn('检测到有未满的盒子，将对新生成的对应颜色螺丝应用继承锁定:', [...needyColors]);
-        for (const screw of newScrews) {
-            if (needyColors.has(screw.color) && !screw.locked) {
-                const potentialControllers = allOnBoardScrews.filter((c) => c.id !== screw.id && canControl(c, screw));
-
-                if (potentialControllers.length > 0) {
-                    // 简单起见，用第一个找到的控制器来锁定它
-                    const controller = potentialControllers[0];
-                    console.log(`为新的 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，由 #${controller.id} 控制。`);
-                    applyLock(controller, screw);
-                } else {
-                    console.warn(`想为 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，但找不到合适的控制器。`);
-                }
-            }
-        }
+        console.warn('检测到有未满的盒子，将对新生成的对应颜色螺丝优先锁定:', [...needyColors]);
     }
-    // --- “卡点颜色”逻辑结束 ---
 
     for (const componentId in screwsByComponent) {
         const componentScrews = screwsByComponent[componentId]; // These are the NEW screws
@@ -1018,19 +999,22 @@ function setupLocks(newScrews) {
                 continue;
             }
 
-            if (currentGroups.size >= getLockGroupLimit()) break;
+            // --- MASTER GATE: Has the board hit its lock group limit? ---
+            if (currentGroups.size >= getLockGroupLimit()) {
+                break; // Stop creating new lock groups for this component
+            }
 
-            // --- Gate 1: The Master Switch for Locking ---
-            // This is the primary difficulty control. If this fails, the screw remains unlocked.
+            // --- GATE 1: SHOULD we lock this screw? ---
+            const mustLock = needyColors.has(locked.color);
             const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
-            console.log('finalProb:', finalProb);
-            if (Math.random() > finalProb) {
-                continue;
+            const shouldLockProbabilistically = Math.random() <= finalProb;
+
+            if (!mustLock && !shouldLockProbabilistically) {
+                continue; // This screw remains free.
             }
 
             // --- Gate 2: Lock Type Selection (only runs if Gate 1 passes) ---
             const allPotentialControllers = allOnBoardScrews.filter((c) => c.id !== locked.id && canControl(c, locked));
-            console.log('allPotentialControllers', allPotentialControllers);
             if (allPotentialControllers.length === 0) continue;
 
             const chainableControllers = allPotentialControllers.filter((c) => c.locked); // Controllers that are ALREADY locked
@@ -1051,11 +1035,13 @@ function setupLocks(newScrews) {
                     return da - db;
                 });
 
-                const limit = Math.min(getLockControllerLimit(), multiLockControllers.length);
-                let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+                const limit = getLockControllerLimit();
+                // [FIXED] 重新引入随机性，确保连接数在 1 到 上限 之间随机
+                let count = 1 + Math.floor(Math.random() * limit);
                 count = Math.round(count * connectionMultiplier);
                 count += extraConnections;
-                count = Math.min(count, multiLockControllers.length, MAX_CONTROLLERS_PER_LOCK);
+                // 最终进行强力限制，确保结果永远不会超过当前进度允许的上限
+                count = Math.min(count, multiLockControllers.length, limit);
 
                 for (let i = 0; i < count; i++) {
                     applyLock(multiLockControllers[i], locked);
@@ -1068,6 +1054,8 @@ function setupLocks(newScrews) {
                 currentGroups.add(locked.id);
             }
         }
+
+        console.log('currentGroups', currentGroups);
 
         // Deadlock prevention logic
         const totalScrewsInComponent = componentScrews.length;
@@ -1595,7 +1583,8 @@ function updateInfo() {
  */
 function getLockGroupLimit() {
     const progress = getProgress();
-    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 3);
+    if (progress < 0.1) return 1; // 新手期，最多1个锁组
+    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 2); // 普通期，最多2个
     if (progress < 0.7) return Math.min(MAX_LOCK_GROUPS, 4);
     return MAX_LOCK_GROUPS;
 }
@@ -1606,9 +1595,10 @@ function getLockGroupLimit() {
  */
 function getLockControllerLimit() {
     const progress = getProgress();
-    if (progress < 0.3) return 2;
-    if (progress < 0.7) return Math.min(MAX_CONTROLLERS_PER_LOCK, 3);
-    return MAX_CONTROLLERS_PER_LOCK;
+    // [FIXED] 简化并修复限制逻辑
+    if (progress < 0.3) return Math.min(gameConfig.MAX_CONTROLLERS, 2);
+    if (progress < 0.7) return Math.min(gameConfig.MAX_CONTROLLERS, 3);
+    return gameConfig.MAX_CONTROLLERS;
 }
 
 /**
@@ -1741,7 +1731,6 @@ function startGame() {
 
         // --- 应用锁算法配置 ---
         MAX_LOCK_GROUPS = settings.maxLockGroups;
-        MAX_CONTROLLERS_PER_LOCK = gameConfig.MAX_CONTROLLERS;
         gameConfig.CHAIN_LOCK_PROBABILITY = settings.chainLockProbability;
 
         // --- 同步UI输入框 (可选, 但保持一致性是好习惯) ---
@@ -2410,7 +2399,6 @@ function updateDifficultyInfoDisplay(level) {
             <li><strong>螺丝颜色种类:</strong> ${settings.colors}</li>
             <li><strong>螺丝盒子总数:</strong> ${settings.boxes}</li>
             <li><strong>最大锁定组数:</strong> ${settings.maxLockGroups} (场上总锁组)</li>
-            <li><strong>最大并联锁数量:</strong> ${settings.maxControllers} (锁的广度)</li>
             <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% (锁的深度)</li>
             <li><strong>最小在场螺丝数:</strong> ${gameConfig.MIN_ONBOARD_SCREWS} (低于此值则补充)</li>
         </ul>
