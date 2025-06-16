@@ -129,11 +129,16 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
     const level = i + 1;
     DIFFICULTY_LEVELS.push({
         level: level,
+        // --- 核心参数 ---
         colors: interpolate(5, 10, NUM_DIFFICULTY_LEVELS, i),
         boxes: interpolate(40, 60, NUM_DIFFICULTY_LEVELS, i),
-        tempSlots: 5,
-        maxControllers: interpolate(1, 5, NUM_DIFFICULTY_LEVELS, i),
-        maxVisiblePlates: interpolate(3, 6, NUM_DIFFICULTY_LEVELS, i),
+        tempSlots: 5, // 临时槽位保持不变
+        // --- 锁生成算法参数 ---
+        maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
+        maxControllers: interpolate(1, 4, NUM_DIFFICULTY_LEVELS, i), // 并联锁数量(广度): 从1个平滑增加到4个
+        chainLockProbability: parseFloat((interpolate(10, 65, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从10%平滑增加到65%
+        // --- 游戏节奏参数 ---
+        minOnboardScrews: interpolate(25, 12, NUM_DIFFICULTY_LEVELS, i), // 最小在场螺丝数: 从25个平滑降低到12个 (让后期版面更拥挤)
     });
 }
 
@@ -978,41 +983,37 @@ function setupLocks(newScrews) {
         for (const locked of componentScrews) {
             if (locked.locked) continue; // Already locked, skip.
 
-            // NEW: A screw that is already acting as a controller for a multi-lock
-            // (i.e., it controls another screw but is not itself locked) cannot be locked.
-            // This prevents multi-lock structures from being absorbed into chain-locks.
+            // A screw that is already acting as a controller for a multi-lock
             if (locked.control && !locked.locked) {
                 continue;
             }
 
             if (currentGroups.size >= getLockGroupLimit()) break;
 
+            // --- Gate 1: The Master Switch for Locking ---
+            // This is the primary difficulty control. If this fails, the screw remains unlocked.
             const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
-            if (Math.random() > finalProb) continue;
+            if (Math.random() > finalProb) {
+                continue;
+            }
 
-            // 1. Find all potential controllers
+            // --- Gate 2: Lock Type Selection (only runs if Gate 1 passes) ---
             const allPotentialControllers = allOnBoardScrews.filter((c) => c.id !== locked.id && canControl(c, locked));
             if (allPotentialControllers.length === 0) continue;
 
-            // 2. Partition controllers into two mutually exclusive types
             const chainableControllers = allPotentialControllers.filter((c) => c.locked); // Controllers that are ALREADY locked
             const multiLockControllers = allPotentialControllers.filter((c) => !c.locked); // Controllers that are FREE
 
-            // 3. Decide lock type and apply
-            const useChainLock = Math.random() < gameConfig.CHAIN_LOCK_PROBABILITY;
+            const preferChainLock = Math.random() < gameConfig.CHAIN_LOCK_PROBABILITY;
 
-            if (useChainLock && chainableControllers.length > 0) {
+            if (preferChainLock && chainableControllers.length > 0) {
                 // --- A) Create a CHAIN LOCK ---
-                // This screw will be locked by a single, already-locked controller.
-                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a)); // Prioritize extending deeper chains
-                const controller = chainableControllers[0];
-                applyLock(controller, locked);
+                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
+                applyLock(chainableControllers[0], locked);
                 currentGroups.add(locked.id);
             } else if (multiLockControllers.length > 0) {
-                // --- B) Create a MULTI-LOCK ---
-                // This screw will be locked by multiple, but *unlocked*, controllers.
+                // --- B) Create a MULTI-LOCK (or fallback for chain lock) ---
                 multiLockControllers.sort((a, b) => {
-                    // Sort by distance to pick the closest ones
                     const da = Math.abs(a.cell.dataset.row - locked.cell.dataset.row) + Math.abs(a.cell.dataset.col - locked.cell.dataset.col);
                     const db = Math.abs(b.cell.dataset.row - locked.cell.dataset.row) + Math.abs(b.cell.dataset.col - locked.cell.dataset.col);
                     return da - db;
@@ -1020,8 +1021,6 @@ function setupLocks(newScrews) {
 
                 const limit = Math.min(getLockControllerLimit(), multiLockControllers.length);
                 let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
-
-                // Apply difficulty modifiers from getStageModifiers()
                 count = Math.round(count * connectionMultiplier);
                 count += extraConnections;
                 count = Math.min(count, multiLockControllers.length, MAX_CONTROLLERS_PER_LOCK);
@@ -1030,10 +1029,15 @@ function setupLocks(newScrews) {
                     applyLock(multiLockControllers[i], locked);
                 }
                 if (count > 0) currentGroups.add(locked.id);
+            } else if (chainableControllers.length > 0) {
+                // --- C) Fallback: If multi-lock was preferred but not possible, create a chain lock ---
+                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
+                applyLock(chainableControllers[0], locked);
+                currentGroups.add(locked.id);
             }
         }
 
-        // NEW: Deadlock prevention logic
+        // Deadlock prevention logic
         const totalScrewsInComponent = componentScrews.length;
         const lockedScrewsInComponent = componentScrews.filter((s) => s.locked).length;
 
@@ -1694,24 +1698,35 @@ function stopAutoPlay() {
  */
 function startGame() {
     stopAutoPlay();
+    // The 50-level slider is the primary source of truth for difficulty settings
     const settings = DIFFICULTY_LEVELS.find((d) => d.level === selectedDifficulty);
 
     if (settings) {
-        document.getElementById('box-count').value = settings.boxes;
-        document.getElementById('color-count-input').value = settings.colors;
-        document.getElementById('temp-count').value = settings.tempSlots;
-        document.getElementById('min-onboard-screws').value = gameConfig.MIN_ONBOARD_SCREWS; // Keep UI in sync
-
+        // --- 应用关卡配置 ---
         TOTAL_BOXES = settings.boxes;
         COLORS = ALL_COLORS.slice(0, Math.min(settings.colors, ALL_COLORS.length));
         MAX_TEMP_SLOTS = settings.tempSlots;
+
+        // --- 应用锁算法配置 ---
+        MAX_LOCK_GROUPS = settings.maxLockGroups;
         MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
-        // Note: MAX_LOCK_GROUPS is now from gameConfig, not difficulty levels.
+        gameConfig.CHAIN_LOCK_PROBABILITY = settings.chainLockProbability;
+
+        // --- 应用游戏节奏配置 ---
+        gameConfig.MIN_ONBOARD_SCREWS = settings.minOnboardScrews;
+
+        // --- 同步UI输入框 (可选, 但保持一致性是好习惯) ---
+        document.getElementById('box-count').value = settings.boxes;
+        document.getElementById('color-count-input').value = settings.colors;
+        document.getElementById('temp-count').value = settings.tempSlots;
+        document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
     } else {
+        // Fallback to manual UI config if something goes wrong
         TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
         const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
         MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
         COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
+        gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     }
 
     hintMessageShown = false; // Reset hint message flag for new game
@@ -1826,8 +1841,7 @@ function updateInputsWithDifficulty(difficulty) {
         document.getElementById('box-count').value = settings.boxes;
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
-        // Also update the config value if you want the UI to drive it
-        gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
+        document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
     }
 }
 
@@ -1851,6 +1865,7 @@ function createDifficultyButtons() {
             button.classList.add('selected');
 
             updateInputsWithDifficulty(selectedDifficulty);
+            updateDifficultyInfoDisplay(selectedDifficulty);
         });
         difficultyButtonsContainer.appendChild(button);
     }
@@ -2261,3 +2276,72 @@ function getBoundingBox(cells) {
         height: maxRow - minRow + 1,
     };
 }
+
+// ===============================================
+// NEW Difficulty Info Panel
+// ===============================================
+function setupDifficultyInfoPanel() {
+    const container = document.getElementById('difficulty-buttons');
+    if (!container) return;
+
+    // Inject CSS for the panel
+    const style = document.createElement('style');
+    style.textContent = `
+        #difficulty-info-panel {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: .25rem;
+            padding: 1rem;
+            margin-top: 1rem;
+            font-family: sans-serif;
+        }
+        #difficulty-info-panel h4 {
+            margin-top: 0;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 0.5rem;
+        }
+        #difficulty-info-panel ul {
+            list-style-type: none;
+            padding-left: 0;
+            margin-bottom: 0;
+        }
+        #difficulty-info-panel li {
+            padding: 0.25rem 0;
+        }
+    `;
+    document.head.appendChild(style);
+
+    const difficultyInfoPanel = document.createElement('div');
+    difficultyInfoPanel.id = 'difficulty-info-panel';
+    container.insertAdjacentElement('afterend', difficultyInfoPanel);
+}
+
+function updateDifficultyInfoDisplay(level) {
+    const panel = document.getElementById('difficulty-info-panel');
+    if (!panel) return;
+
+    const settings = DIFFICULTY_LEVELS.find((d) => d.level === level);
+    if (!settings) {
+        panel.innerHTML = '未找到所选难度的配置信息。';
+        return;
+    }
+
+    const infoHTML = `
+        <h4>难度 ${level} 配置详情</h4>
+        <ul>
+            <li><strong>螺丝颜色种类:</strong> ${settings.colors}</li>
+            <li><strong>螺丝盒子总数:</strong> ${settings.boxes}</li>
+            <li><strong>最大锁定组数:</strong> ${settings.maxLockGroups} (场上总锁组)</li>
+            <li><strong>最大并联锁数量:</strong> ${settings.maxControllers} (锁的广度)</li>
+            <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% (锁的深度)</li>
+            <li><strong>最小在场螺丝数:</strong> ${settings.minOnboardScrews} (低于此值则补充)</li>
+        </ul>
+    `;
+    panel.innerHTML = infoHTML;
+}
+
+// Initial setup
+createDifficultyButtons();
+setupDifficultyInfoPanel();
+updateDifficultyInfoDisplay(selectedDifficulty);
+startGame();
