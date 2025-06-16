@@ -12,7 +12,7 @@ const gameConfig = {
     MAX_TEMP_SLOTS: 5, // 初始临时槽位数量
     MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
     MAX_CONTROLLERS_PER_LOCK: 4, // 单个锁最多能控制的螺丝数量
-    MAX_LOCK_GROUPS: 4, // 同一时间场上最多存在的锁定组数量
+    MAX_LOCK_GROUPS: 6, // 同一时间场上最多存在的锁定组数量
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
 
@@ -136,9 +136,7 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
         maxControllers: interpolate(1, 4, NUM_DIFFICULTY_LEVELS, i), // 并联锁数量(广度): 从1个平滑增加到4个
-        chainLockProbability: parseFloat((interpolate(10, 65, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从10%平滑增加到65%
-        // --- 游戏节奏参数 ---
-        minOnboardScrews: interpolate(25, 12, NUM_DIFFICULTY_LEVELS, i), // 最小在场螺丝数: 从25个平滑降低到12个 (让后期版面更拥挤)
+        chainLockProbability: parseFloat((interpolate(50, 90, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到65%
     });
 }
 
@@ -331,6 +329,7 @@ let nextPlateZ = 1000; // 记录下一个板块的 zIndex，从大到小生成�
 
 const eliminatedScrewIds = new Set();
 let hintMessageShown = false;
+let lastCompletedColor = null; // 用于防止连续出现相同颜色盒子的冷却机制
 
 /**
  * 创建游戏网格
@@ -976,6 +975,47 @@ function setupLocks(newScrews) {
     // NEW: Get all screws on board to act as potential controllers
     const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
 
+    // --- 新增： “卡点颜色”锁定继承逻辑 ---
+    // 目标：如果玩家在一个颜色上被卡住（盒子未满，且该颜色有螺丝被锁），
+    // 那么新生成的该颜色螺丝也应被锁定，以维持挑战。
+    const needyColors = new Set();
+    document.querySelectorAll('.box[data-enabled="true"]').forEach((box) => {
+        const filledSlots = box.querySelectorAll('.slot[data-filled="true"]').length;
+        if (filledSlots < 3) {
+            needyColors.add(box.dataset.color);
+        }
+    });
+
+    if (needyColors.size > 0) {
+        const stuckColors = new Set();
+        const allLockedScrews = allOnBoardScrews.filter((s) => s.locked);
+
+        for (const color of needyColors) {
+            if (allLockedScrews.some((s) => s.color === color)) {
+                stuckColors.add(color);
+            }
+        }
+
+        if (stuckColors.size > 0) {
+            console.warn('检测到被卡住的颜色，将对新螺丝应用继承锁定:', [...stuckColors]);
+            for (const screw of newScrews) {
+                if (stuckColors.has(screw.color) && !screw.locked) {
+                    const potentialControllers = allOnBoardScrews.filter((c) => c.id !== screw.id && canControl(c, screw));
+
+                    if (potentialControllers.length > 0) {
+                        // 简单起见，用第一个找到的控制器来锁定它
+                        const controller = potentialControllers[0];
+                        console.log(`为新的 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，由 #${controller.id} 控制。`);
+                        applyLock(controller, screw);
+                    } else {
+                        console.warn(`想为 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，但找不到合适的控制器。`);
+                    }
+                }
+            }
+        }
+    }
+    // --- “卡点颜色”逻辑结束 ---
+
     for (const componentId in screwsByComponent) {
         const componentScrews = screwsByComponent[componentId]; // These are the NEW screws
         let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
@@ -988,17 +1028,21 @@ function setupLocks(newScrews) {
                 continue;
             }
 
+            console.log('currentGroups.size', currentGroups.size, 'getLockGroupLimit()', getLockGroupLimit());
+
             if (currentGroups.size >= getLockGroupLimit()) break;
 
             // --- Gate 1: The Master Switch for Locking ---
             // This is the primary difficulty control. If this fails, the screw remains unlocked.
             const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
+            console.log('finalProb:', finalProb);
             if (Math.random() > finalProb) {
                 continue;
             }
 
             // --- Gate 2: Lock Type Selection (only runs if Gate 1 passes) ---
             const allPotentialControllers = allOnBoardScrews.filter((c) => c.id !== locked.id && canControl(c, locked));
+            console.log('allPotentialControllers', allPotentialControllers);
             if (allPotentialControllers.length === 0) continue;
 
             const chainableControllers = allPotentialControllers.filter((c) => c.locked); // Controllers that are ALREADY locked
@@ -1563,8 +1607,8 @@ function updateInfo() {
  */
 function getLockGroupLimit() {
     const progress = getProgress();
-    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 2);
-    if (progress < 0.7) return Math.min(MAX_LOCK_GROUPS, 3);
+    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 3);
+    if (progress < 0.7) return Math.min(MAX_LOCK_GROUPS, 4);
     return MAX_LOCK_GROUPS;
 }
 
@@ -1712,14 +1756,10 @@ function startGame() {
         MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
         gameConfig.CHAIN_LOCK_PROBABILITY = settings.chainLockProbability;
 
-        // --- 应用游戏节奏配置 ---
-        gameConfig.MIN_ONBOARD_SCREWS = settings.minOnboardScrews;
-
         // --- 同步UI输入框 (可选, 但保持一致性是好习惯) ---
         document.getElementById('box-count').value = settings.boxes;
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
-        document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
         document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
     } else {
         // Fallback to manual UI config if something goes wrong
@@ -1842,7 +1882,7 @@ function updateInputsWithDifficulty(difficulty) {
         document.getElementById('box-count').value = settings.boxes;
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
-        document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
+        document.getElementById('min-onboard-screws').value = gameConfig.MIN_ONBOARD_SCREWS;
         // 新增：同步链式锁概率输入框
         if (document.getElementById('chain-lock-prob-input')) {
             document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
@@ -1970,6 +2010,26 @@ function setupBox(box, isManualAdd = false) {
         return;
     }
 
+    // --- 新增：防止立即重复出现刚消除的颜色 ---
+    if (lastCompletedColor && turnCandidates.length > 1 && !isManualAdd) {
+        const colorStats = allColorStats[lastCompletedColor];
+        const onBoardCount = colorStats ? colorStats.onBoardLocked + colorStats.onBoardUnlocked : 0;
+        const HIGH_COUNT_THRESHOLD = 9; // 定义一个阈值，超过此数量则可忽略冷却
+
+        // 仅当场上该颜色螺丝数量不多时，才应用冷却
+        if (onBoardCount < HIGH_COUNT_THRESHOLD) {
+            const filteredCandidates = turnCandidates.filter((c) => c !== lastCompletedColor);
+            // 确保过滤后仍有候选，否则强制使用原列表
+            if (filteredCandidates.length > 0) {
+                console.log(`冷却机制：上一个完成的颜色是 ${lastCompletedColor}，本次优先选择其他颜色。`);
+                turnCandidates = filteredCandidates;
+            }
+        }
+    }
+    // 这是一个一次性效果，立即重置
+    lastCompletedColor = null;
+    // --- 冷却逻辑结束 ---
+
     // 3. Prioritized Selection: Choose the best color from the dynamic candidates.
     const progress = getProgress();
     let bestColor = null;
@@ -1985,12 +2045,23 @@ function setupBox(box, isManualAdd = false) {
             return stats && stats.onBoardUnlocked + stats.inTemp >= 3;
         });
     } else {
-        // Late Game: Challenging colors
+        // Late Game: Challenging colors ("严师") - REFINED LOGIC
+        // 优先选择那些"可解但被锁住"的颜色
+        // 条件1: 场上该颜色总数 >= 3 (保证可解性)
+        // 条件2: 场上该颜色至少有1个被锁住 (保证挑战性)
         strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
-            return stats && stats.onBoardLocked > 0;
+            return (
+                stats &&
+                stats.onBoardLocked > 0 &&
+                stats.onBoardUnlocked + stats.inTemp + stats.inBox < 3 &&
+                stats.onBoardUnlocked + stats.onBoardLocked + stats.inTemp + stats.inBox >= 3
+            );
         });
+        console.log('strategicColors:', strategicColors);
     }
+    console.log('usedBoxColors:', usedBoxColors);
+    console.log('turnCandidates:', turnCandidates);
 
     // Priority 1: A strategic color that is not a duplicate on the board.
     const p1 = strategicColors.find((c) => !usedBoxColors.has(c));
@@ -2102,6 +2173,7 @@ function checkAndProcessBoxMatch(box) {
             });
 
             usedBoxColors.delete(color);
+            lastCompletedColor = color; // 在分配新盒子前，记录刚刚完成的颜色
             setupBox(box);
             showMessage('🎉 三消成功！');
             setTimeout(() => showMessage(''), 1500);
@@ -2345,7 +2417,7 @@ function updateDifficultyInfoDisplay(level) {
             <li><strong>最大锁定组数:</strong> ${settings.maxLockGroups} (场上总锁组)</li>
             <li><strong>最大并联锁数量:</strong> ${settings.maxControllers} (锁的广度)</li>
             <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% (锁的深度)</li>
-            <li><strong>最小在场螺丝数:</strong> ${settings.minOnboardScrews} (低于此值则补充)</li>
+            <li><strong>最小在场螺丝数:</strong> ${gameConfig.MIN_ONBOARD_SCREWS} (低于此值则补充)</li>
         </ul>
     `;
     panel.innerHTML = infoHTML;
