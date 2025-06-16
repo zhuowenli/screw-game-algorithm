@@ -13,6 +13,8 @@ const gameConfig = {
     MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
     MAX_CONTROLLERS_PER_LOCK: 4, // 单个锁最多能控制的螺丝数量
     MAX_LOCK_GROUPS: 4, // 同一时间场上最多存在的锁定组数量
+    MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
+    CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
 
     // --- 初始生成 (Initial Spawning) ---
     // 定义游戏开始时，默认生成的各类板块数量
@@ -803,8 +805,16 @@ function applyLock(controller, locked) {
  * @returns {boolean} 是否可以控制
  */
 function canControl(controller, target) {
-    if (controller.componentId !== target.componentId) return false;
+    // if (controller.componentId !== target.componentId) return false; // DEPRECATED: Allow inter-component locking
     if (controller.control) return false;
+    if (!controller.cell || !target.cell) return false; // Screws must be on board to lock
+
+    // NEW: Inter-component distance check
+    const dist = Math.abs(controller.cell.dataset.row - target.cell.dataset.row) + Math.abs(controller.cell.dataset.col - target.cell.dataset.col);
+    if (dist > gameConfig.MAX_INTER_COMPONENT_LOCK_DISTANCE) {
+        return false;
+    }
+
     let c = controller;
     let depth = 1;
     while (c) {
@@ -958,41 +968,69 @@ function setupLocks(newScrews) {
         screwsByComponent[screw.componentId].push(screw);
     }
 
+    // NEW: Get all screws on board to act as potential controllers
+    const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
+
     for (const componentId in screwsByComponent) {
-        const componentScrews = screwsByComponent[componentId];
+        const componentScrews = screwsByComponent[componentId]; // These are the NEW screws
         let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
 
         for (const locked of componentScrews) {
-            if (!locked.controllers.length && currentGroups.size >= getLockGroupLimit()) break;
-            const requiredDepth = maxColorLockDepth(locked.color);
+            if (locked.locked) continue; // Already locked, skip.
 
-            if (requiredDepth === 0) {
-                const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
-                if (Math.random() > finalProb) continue;
+            // NEW: A screw that is already acting as a controller for a multi-lock
+            // (i.e., it controls another screw but is not itself locked) cannot be locked.
+            // This prevents multi-lock structures from being absorbed into chain-locks.
+            if (locked.control && !locked.locked) {
+                continue;
             }
 
-            let controllers = componentScrews.filter((c) => c !== locked && canControl(c, locked));
-            if (controllers.length === 0) continue;
-            controllers.sort((a, b) => {
-                const da = Math.abs(a.row - locked.row) + Math.abs(a.col - locked.col);
-                const db = Math.abs(b.row - locked.row) + Math.abs(b.col - locked.col);
-                return da - db;
-            });
-            controllers = controllers.filter((c) => getLockDepth(c) >= Math.max(1, requiredDepth - 1));
-            if (controllers.length === 0) continue;
-            const limit = Math.min(getLockControllerLimit(), controllers.length);
-            let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
-
-            // Apply difficulty modifiers
-            count = Math.round(count * connectionMultiplier);
-            count += extraConnections;
-            count = Math.min(count, controllers.length, MAX_CONTROLLERS_PER_LOCK);
-
-            for (let i = 0; i < count; i++) {
-                applyLock(controllers[i], locked);
-            }
-            currentGroups.add(locked.id);
             if (currentGroups.size >= getLockGroupLimit()) break;
+
+            const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
+            if (Math.random() > finalProb) continue;
+
+            // 1. Find all potential controllers
+            const allPotentialControllers = allOnBoardScrews.filter((c) => c.id !== locked.id && canControl(c, locked));
+            if (allPotentialControllers.length === 0) continue;
+
+            // 2. Partition controllers into two mutually exclusive types
+            const chainableControllers = allPotentialControllers.filter((c) => c.locked); // Controllers that are ALREADY locked
+            const multiLockControllers = allPotentialControllers.filter((c) => !c.locked); // Controllers that are FREE
+
+            // 3. Decide lock type and apply
+            const useChainLock = Math.random() < gameConfig.CHAIN_LOCK_PROBABILITY;
+
+            if (useChainLock && chainableControllers.length > 0) {
+                // --- A) Create a CHAIN LOCK ---
+                // This screw will be locked by a single, already-locked controller.
+                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a)); // Prioritize extending deeper chains
+                const controller = chainableControllers[0];
+                applyLock(controller, locked);
+                currentGroups.add(locked.id);
+            } else if (multiLockControllers.length > 0) {
+                // --- B) Create a MULTI-LOCK ---
+                // This screw will be locked by multiple, but *unlocked*, controllers.
+                multiLockControllers.sort((a, b) => {
+                    // Sort by distance to pick the closest ones
+                    const da = Math.abs(a.cell.dataset.row - locked.cell.dataset.row) + Math.abs(a.cell.dataset.col - locked.cell.dataset.col);
+                    const db = Math.abs(b.cell.dataset.row - locked.cell.dataset.row) + Math.abs(b.cell.dataset.col - locked.cell.dataset.col);
+                    return da - db;
+                });
+
+                const limit = Math.min(getLockControllerLimit(), multiLockControllers.length);
+                let count = limit > 1 ? 1 + Math.floor(Math.random() * limit) : 1;
+
+                // Apply difficulty modifiers from getStageModifiers()
+                count = Math.round(count * connectionMultiplier);
+                count += extraConnections;
+                count = Math.min(count, multiLockControllers.length, MAX_CONTROLLERS_PER_LOCK);
+
+                for (let i = 0; i < count; i++) {
+                    applyLock(multiLockControllers[i], locked);
+                }
+                if (count > 0) currentGroups.add(locked.id);
+            }
         }
 
         // NEW: Deadlock prevention logic
