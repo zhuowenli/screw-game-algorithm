@@ -12,7 +12,7 @@ const gameConfig = {
     MAX_TEMP_SLOTS: 5, // 初始临时槽位数量
     MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
     MAX_CONTROLLERS_PER_LOCK: 4, // 单个锁最多能控制的螺丝数量
-    MAX_LOCK_GROUPS: 6, // 同一时间场上最多存在的锁定组数量
+    MAX_LOCK_GROUPS: 8, // 同一时间场上最多存在的锁定组数量
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
 
@@ -28,14 +28,14 @@ const gameConfig = {
     // 根据游戏进度(progress)划分的难度阶梯
     DIFFICULTY_STAGES: {
         STAGE_0_PROGRESS: 0.1, // 阶段0: 新手期进度上限
-        STAGE_1_PROGRESS: 0.3, // 阶段1: 普通期进度上限
-        STAGE_2_PROGRESS: 0.5, // 阶段2: 紧张期进度上限
-        STAGE_3_PROGRESS: 0.7, // 阶段3: 危险期进度上限
+        STAGE_1_PROGRESS: 0.2, // 阶段1: 普通期进度上限
+        STAGE_2_PROGRESS: 0.4, // 阶段2: 紧张期进度上限
+        STAGE_3_PROGRESS: 0.6, // 阶段3: 危险期进度上限
 
         // 每个阶段对应的具体难度修正值
         MODIFIERS: [
             // 阶段0 (新手): 极低的锁概率
-            { lockProbFactor: 0.1, connectionMultiplier: 1.0, extraConnections: 0 },
+            { lockProbFactor: 0.3, connectionMultiplier: 1.0, extraConnections: 0 },
             // 阶段1 (普通): 正常难度
             { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0 },
             // 阶段2 (紧张): 难度略微提升
@@ -136,7 +136,7 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
         maxControllers: interpolate(1, 4, NUM_DIFFICULTY_LEVELS, i), // 并联锁数量(广度): 从1个平滑增加到4个
-        chainLockProbability: parseFloat((interpolate(50, 90, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到65%
+        chainLockProbability: parseFloat((interpolate(30, 80, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到80%
     });
 }
 
@@ -975,9 +975,9 @@ function setupLocks(newScrews) {
     // NEW: Get all screws on board to act as potential controllers
     const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
 
-    // --- 新增： “卡点颜色”锁定继承逻辑 ---
-    // 目标：如果玩家在一个颜色上被卡住（盒子未满，且该颜色有螺丝被锁），
-    // 那么新生成的该颜色螺丝也应被锁定，以维持挑战。
+    // --- “卡点颜色”锁定继承逻辑 (已根据最新需求优化) ---
+    // 目标：如果场上存在一个未满的盒子（比如蓝色），那么任何新生成的对应颜色（蓝色）的螺丝，
+    // 都应该被自动锁定，以防止玩家通过刷板块来轻松完成三消。
     const needyColors = new Set();
     document.querySelectorAll('.box[data-enabled="true"]').forEach((box) => {
         const filledSlots = box.querySelectorAll('.slot[data-filled="true"]').length;
@@ -987,29 +987,18 @@ function setupLocks(newScrews) {
     });
 
     if (needyColors.size > 0) {
-        const stuckColors = new Set();
-        const allLockedScrews = allOnBoardScrews.filter((s) => s.locked);
+        console.warn('检测到有未满的盒子，将对新生成的对应颜色螺丝应用继承锁定:', [...needyColors]);
+        for (const screw of newScrews) {
+            if (needyColors.has(screw.color) && !screw.locked) {
+                const potentialControllers = allOnBoardScrews.filter((c) => c.id !== screw.id && canControl(c, screw));
 
-        for (const color of needyColors) {
-            if (allLockedScrews.some((s) => s.color === color)) {
-                stuckColors.add(color);
-            }
-        }
-
-        if (stuckColors.size > 0) {
-            console.warn('检测到被卡住的颜色，将对新螺丝应用继承锁定:', [...stuckColors]);
-            for (const screw of newScrews) {
-                if (stuckColors.has(screw.color) && !screw.locked) {
-                    const potentialControllers = allOnBoardScrews.filter((c) => c.id !== screw.id && canControl(c, screw));
-
-                    if (potentialControllers.length > 0) {
-                        // 简单起见，用第一个找到的控制器来锁定它
-                        const controller = potentialControllers[0];
-                        console.log(`为新的 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，由 #${controller.id} 控制。`);
-                        applyLock(controller, screw);
-                    } else {
-                        console.warn(`想为 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，但找不到合适的控制器。`);
-                    }
+                if (potentialControllers.length > 0) {
+                    // 简单起见，用第一个找到的控制器来锁定它
+                    const controller = potentialControllers[0];
+                    console.log(`为新的 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，由 #${controller.id} 控制。`);
+                    applyLock(controller, screw);
+                } else {
+                    console.warn(`想为 ${screw.color} 螺丝 #${screw.id} 应用继承锁定，但找不到合适的控制器。`);
                 }
             }
         }
@@ -1027,8 +1016,6 @@ function setupLocks(newScrews) {
             if (locked.control && !locked.locked) {
                 continue;
             }
-
-            console.log('currentGroups.size', currentGroups.size, 'getLockGroupLimit()', getLockGroupLimit());
 
             if (currentGroups.size >= getLockGroupLimit()) break;
 
@@ -2058,10 +2045,7 @@ function setupBox(box, isManualAdd = false) {
                 stats.onBoardUnlocked + stats.onBoardLocked + stats.inTemp + stats.inBox >= 3
             );
         });
-        console.log('strategicColors:', strategicColors);
     }
-    console.log('usedBoxColors:', usedBoxColors);
-    console.log('turnCandidates:', turnCandidates);
 
     // Priority 1: A strategic color that is not a duplicate on the board.
     const p1 = strategicColors.find((c) => !usedBoxColors.has(c));
