@@ -1,3 +1,77 @@
+// =================================================================
+// 游戏核心配置 (Game Core Configuration)
+// 策划可以在此调整游戏的核心数值和行为
+// =================================================================
+const gameConfig = {
+    // --- 棋盘与布局 (Board & Layout) ---
+    ROWS: 30, // 棋盘行数
+    COLS: 20, // 棋盘列数
+    MIN_ONBOARD_SCREWS: 15, // 场上螺丝数量下限，低于此值会尝试生成新板块
+
+    // --- 核心玩法 (Core Gameplay) ---
+    MAX_TEMP_SLOTS: 5, // 初始临时槽位数量
+    MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
+    MAX_CONTROLLERS_PER_LOCK: 4, // 单个锁最多能控制的螺丝数量
+    MAX_LOCK_GROUPS: 4, // 同一时间场上最多存在的锁定组数量
+
+    // --- 初始生成 (Initial Spawning) ---
+    // 定义游戏开始时，默认生成的各类板块数量
+    INITIAL_SPAWN_COUNTS: {
+        LARGE: 1, // 初始生成的大型板块数量
+        MEDIUM: 2, // 初始生成的中型板块数量 (会尝试生成这么多, 但不超过关卡计划的总数)
+        SMALL: 4, // 初始生成的的小型板块数量
+    },
+
+    // --- 动态难度 (Dynamic Difficulty) ---
+    // 根据游戏进度(progress)划分的难度阶梯
+    DIFFICULTY_STAGES: {
+        STAGE_0_PROGRESS: 0.1, // 阶段0: 新手期进度上限
+        STAGE_1_PROGRESS: 0.3, // 阶段1: 普通期进度上限
+        STAGE_2_PROGRESS: 0.5, // 阶段2: 紧张期进度上限
+        STAGE_3_PROGRESS: 0.7, // 阶段3: 危险期进度上限
+
+        // 每个阶段对应的具体难度修正值
+        MODIFIERS: [
+            // 阶段0 (新手): 极低的锁概率
+            { lockProbFactor: 0.1, connectionMultiplier: 1.0, extraConnections: 0 },
+            // 阶段1 (普通): 正常难度
+            { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0 },
+            // 阶段2 (紧张): 难度略微提升
+            { lockProbFactor: 1.5, connectionMultiplier: 1.2, extraConnections: 0 },
+            // 阶段3 (危险): 难度显著提升
+            { lockProbFactor: 2.0, connectionMultiplier: 1.5, extraConnections: 1 },
+            // 阶段4 (最终): 最高难度，可用于触发提示
+            { lockProbFactor: 2.5, connectionMultiplier: 1.5, extraConnections: 2 },
+        ],
+    },
+
+    // --- "智能"盒子生成AI (Intelligent Box AI) ---
+    BOX_AI_CHALLENGE_THRESHOLD: 0.5, // 游戏进度超过此值，盒子AI会从"帮助者"变为"挑战者"
+
+    // --- 板块生成配置 (Component Generation) ---
+    // 定义了关卡中总共会生成多少、以及如何生成各种尺寸的板块
+    COMPONENT_CONFIG: {
+        LARGE: {
+            count: 1, // 关卡大型板块总数
+            layers: () => 5 + Math.floor(Math.random() * 6), // 层数范围: 5-10
+            screwsPerLayer: () => 3 + Math.floor(Math.random() * 6), // 每层螺丝数范围: 3-8
+            size: { width: 10, height: 10 },
+        },
+        MEDIUM: {
+            count: () => 4 + Math.floor(Math.random() * 3), // 关卡中型板块总数范围: 4-6
+            layers: () => 3 + Math.floor(Math.random() * 3), // 层数范围: 3-5
+            screwsPerLayer: () => 2 + Math.floor(Math.random() * 5), // 每层螺丝数范围: 2-6
+            size: { width: 6, height: 6 },
+        },
+        SMALL: {
+            count: () => 25 + Math.floor(Math.random() * 6), // 关卡小型板块总数范围: 25+
+            layers: () => 1 + Math.floor(Math.random() * 2), // 层数范围: 1-2
+            screwsPerLayer: () => 1, // 每层螺丝数范围: 1
+            size: { width: 3, height: 3 },
+        },
+    },
+};
+
 const ALL_COLORS = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'brown', 'cyan', 'gray'];
 const COLOR_NAMES = {
     red: '红色',
@@ -12,17 +86,17 @@ const COLOR_NAMES = {
     gray: '灰色',
 };
 let COLORS = ALL_COLORS.slice(0, 7);
-const ROWS = 30;
-const COLS = 20;
+const ROWS = gameConfig.ROWS;
+const COLS = gameConfig.COLS;
 const MAX_ACTIVATED_CELLS = 200;
-const AUTO_PLAY_INTERVAL = 100; // 自动点击间隔
+const AUTO_PLAY_INTERVAL = 150; // 自动点击间隔
 let TOTAL_BOXES = 50;
 let TOTAL_SCREWS = TOTAL_BOXES * 3;
 let MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
-const MAX_CHAIN_LENGTH = 5; // 1对1连线最大节点数(5=4条线)
-let MAX_LOCK_GROUPS = 4; // 同时最多锁定组数
-let MAX_CONTROLLERS_PER_LOCK = 3; // 单个锁最多控制螺丝数量
-let MAX_TEMP_SLOTS = 5;
+const MAX_CHAIN_LENGTH = gameConfig.MAX_CHAIN_LENGTH;
+let MAX_LOCK_GROUPS = gameConfig.MAX_LOCK_GROUPS;
+let MAX_CONTROLLERS_PER_LOCK = gameConfig.MAX_CONTROLLERS_PER_LOCK;
+let MAX_TEMP_SLOTS = gameConfig.MAX_TEMP_SLOTS;
 // 记录最近一次拔出螺丝的格子
 let lastRemovedCell = null;
 let selectedDifficulty = 25; // 默认难度
@@ -30,26 +104,7 @@ let selectedDifficulty = 25; // 默认难度
 const DIFFICULTY_LEVELS = [];
 const NUM_DIFFICULTY_LEVELS = 50;
 
-const COMPONENT_CONFIG = {
-    LARGE: {
-        count: 1,
-        layers: () => 5 + Math.floor(Math.random() * 6), // 5-10
-        screwsPerLayer: () => 3 + Math.floor(Math.random() * 6), // 3-8
-        size: { width: 10, height: 10 },
-    },
-    MEDIUM: {
-        count: () => 4 + Math.floor(Math.random() * 3), // 4-6
-        layers: () => 3 + Math.floor(Math.random() * 3), // 3-5
-        screwsPerLayer: () => 2 + Math.floor(Math.random() * 5), // 2-6
-        size: { width: 6, height: 6 },
-    },
-    SMALL: {
-        count: () => 25 + Math.floor(Math.random() * 6), // 25+
-        layers: () => 1 + Math.floor(Math.random() * 2), // 1-2
-        screwsPerLayer: () => 1,
-        size: { width: 3, height: 3 },
-    },
-};
+const COMPONENT_CONFIG = gameConfig.COMPONENT_CONFIG;
 
 // 全局状态
 let components = [];
@@ -75,7 +130,6 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         colors: interpolate(5, 10, NUM_DIFFICULTY_LEVELS, i),
         boxes: interpolate(40, 60, NUM_DIFFICULTY_LEVELS, i),
         tempSlots: 5,
-        maxLockGroups: interpolate(2, 7, NUM_DIFFICULTY_LEVELS, i),
         maxControllers: interpolate(1, 5, NUM_DIFFICULTY_LEVELS, i),
         maxVisiblePlates: interpolate(3, 6, NUM_DIFFICULTY_LEVELS, i),
     });
@@ -807,28 +861,23 @@ function getProgress() {
  */
 function getStageModifiers() {
     const progress = getProgress();
+    const stages = gameConfig.DIFFICULTY_STAGES;
 
-    if (progress < 0.1) {
-        // Stage 0: Tutorial, very few locks
-        return { lockProbFactor: 0.1, connectionMultiplier: 1.0, extraConnections: 0, hint: '' };
+    if (progress < stages.STAGE_0_PROGRESS) {
+        return { ...stages.MODIFIERS[0], hint: '' };
     }
-    if (progress < 0.3) {
-        // Stage 1: Normal
-        return { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0, hint: '' };
+    if (progress < stages.STAGE_1_PROGRESS) {
+        return { ...stages.MODIFIERS[1], hint: '' };
     }
-    if (progress < 0.5) {
-        // Stage 2: Tense
-        return { lockProbFactor: 1.5, connectionMultiplier: 1.2, extraConnections: 0, hint: '' };
+    if (progress < stages.STAGE_2_PROGRESS) {
+        return { ...stages.MODIFIERS[2], hint: '' };
     }
-    if (progress < 0.7) {
-        // Stage 3: Dangerous
-        return { lockProbFactor: 2.0, connectionMultiplier: 1.5, extraConnections: 1 + Math.floor(Math.random() * 2), hint: '' };
+    if (progress < stages.STAGE_3_PROGRESS) {
+        return { ...stages.MODIFIERS[3], hint: '' };
     }
     // Stage 4: Monetization Hook
     return {
-        lockProbFactor: 2.5,
-        connectionMultiplier: 1.5,
-        extraConnections: 1 + Math.floor(Math.random() * 2),
+        ...stages.MODIFIERS[4],
         // hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
     };
 }
@@ -1482,8 +1531,8 @@ function getLockGroupLimit() {
  */
 function getLockControllerLimit() {
     const progress = getProgress();
-    if (progress < 0.3) return 1;
-    if (progress < 0.7) return Math.min(MAX_CONTROLLERS_PER_LOCK, 2);
+    if (progress < 0.3) return 2;
+    if (progress < 0.7) return Math.min(MAX_CONTROLLERS_PER_LOCK, 3);
     return MAX_CONTROLLERS_PER_LOCK;
 }
 
@@ -1553,7 +1602,7 @@ function autoPlayStep() {
         const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
         for (const dot of dots) {
             if (dot.dataset.blocked !== 'true') {
-                console.log('当前有匹配盒子颜色，自动点击:', dot.dataset.sid, 'color:', color);
+                console.log('当前有匹配盒子颜色，自动点击:', dot.dataset.sid, 'color:', color, dot.dataset.color);
                 if (tryClickDot(dot, 'box ' + color)) return;
             }
         }
@@ -1572,7 +1621,9 @@ function autoPlayStep() {
             bestCount = dots.length;
         }
     }
-    if (bestPlate) {
+    const emptySlots = tempSlotsState.filter((d) => d === null).length;
+
+    if (bestPlate && emptySlots > 1) {
         for (const dot of bestDots) {
             if (dot.dataset.blocked !== 'true') {
                 console.log('没有匹配颜色螺丝，尝试解锁板块螺丝:', dot);
@@ -1610,12 +1661,13 @@ function startGame() {
         document.getElementById('box-count').value = settings.boxes;
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
+        document.getElementById('min-onboard-screws').value = gameConfig.MIN_ONBOARD_SCREWS; // Keep UI in sync
 
         TOTAL_BOXES = settings.boxes;
         COLORS = ALL_COLORS.slice(0, Math.min(settings.colors, ALL_COLORS.length));
         MAX_TEMP_SLOTS = settings.tempSlots;
-        MAX_LOCK_GROUPS = settings.maxLockGroups;
         MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
+        // Note: MAX_LOCK_GROUPS is now from gameConfig, not difficulty levels.
     } else {
         TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
         const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
@@ -1659,38 +1711,30 @@ function startGame() {
     initBoardState();
 
     // Spawn initial components
-    const initialLarge = 1;
-    const initialMedium = components.filter((c) => c.type === 'MEDIUM' && !c.isSpawned).length;
-    // Spawn a few small ones to ensure enough starting elements
-    const initialSmall = 3 + Math.floor(Math.random() * 3); // 3-5 small components
-
-    let spawnedCount = 0;
+    const initialSpawn = gameConfig.INITIAL_SPAWN_COUNTS;
+    const availableMedium = components.filter((c) => c.type === 'MEDIUM').length;
 
     // Spawn Large
+    let spawnedCount = 0;
     for (const comp of components) {
-        if (comp.type === 'LARGE' && spawnComponent(comp)) {
-            spawnedCount++;
-            break; // Should only be one
+        if (comp.type === 'LARGE' && spawnedCount < initialSpawn.LARGE) {
+            if (spawnComponent(comp)) spawnedCount++;
         }
     }
 
     // Spawn Medium
-    let spawnedMedium = 0;
+    spawnedCount = 0;
     for (const comp of components) {
-        if (spawnedMedium >= initialMedium) break;
-        if (comp.type === 'MEDIUM' && spawnComponent(comp)) {
-            spawnedMedium++;
-            spawnedCount++;
+        if (comp.type === 'MEDIUM' && spawnedCount < Math.min(initialSpawn.MEDIUM, availableMedium)) {
+            if (spawnComponent(comp)) spawnedCount++;
         }
     }
 
     // Spawn Small
-    let spawnedSmall = 0;
+    spawnedCount = 0;
     for (const comp of components) {
-        if (spawnedSmall >= initialSmall) break;
-        if (comp.type === 'SMALL' && spawnComponent(comp)) {
-            spawnedSmall++;
-            spawnedCount++;
+        if (comp.type === 'SMALL' && spawnedCount < initialSpawn.SMALL) {
+            if (spawnComponent(comp)) spawnedCount++;
         }
     }
 
@@ -1743,6 +1787,8 @@ function updateInputsWithDifficulty(difficulty) {
         document.getElementById('box-count').value = settings.boxes;
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
+        // Also update the config value if you want the UI to drive it
+        gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     }
 }
 
@@ -1773,10 +1819,14 @@ function createDifficultyButtons() {
 
 document.getElementById('start-btn').addEventListener('click', () => {
     stopAutoPlay();
+    // Update config from UI before starting
+    gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     startGame();
 });
 document.getElementById('reset-btn').addEventListener('click', () => {
     stopAutoPlay();
+    // Update config from UI before starting
+    gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     startGame();
 });
 autoBtn.addEventListener('click', () => {
@@ -1863,7 +1913,7 @@ function setupBox(box, isManualAdd = false) {
     if (isManualAdd) {
         const tempSlotColors = tempSlotsState.filter((d) => d).map((d) => d.dataset.color);
         strategicColors = [...new Set(tempSlotColors)].filter((c) => turnCandidates.includes(c));
-    } else if (progress < 0.5) {
+    } else if (progress < gameConfig.BOX_AI_CHALLENGE_THRESHOLD) {
         // Early Game: Helpful colors
         strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
@@ -2084,7 +2134,7 @@ function spawnComponent(component) {
 }
 
 function checkAndReplenishScrews() {
-    const minOnboard = parseInt(document.getElementById('min-onboard-screws').value, 10) || 15;
+    const minOnboard = gameConfig.MIN_ONBOARD_SCREWS;
     let currentOnBoard = Object.values(countBoardColors()).reduce((a, b) => a + b, 0);
 
     let safetyBreak = 0;
