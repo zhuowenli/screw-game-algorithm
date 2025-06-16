@@ -1720,6 +1720,7 @@ function startGame() {
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
         document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
+        document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
     } else {
         // Fallback to manual UI config if something goes wrong
         TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
@@ -1842,6 +1843,10 @@ function updateInputsWithDifficulty(difficulty) {
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
         document.getElementById('min-onboard-screws').value = settings.minOnboardScrews;
+        // 新增：同步链式锁概率输入框
+        if (document.getElementById('chain-lock-prob-input')) {
+            document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
+        }
     }
 }
 
@@ -1875,12 +1880,18 @@ document.getElementById('start-btn').addEventListener('click', () => {
     stopAutoPlay();
     // Update config from UI before starting
     gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
+    if (document.getElementById('chain-lock-prob-input')) {
+        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
+    }
     startGame();
 });
 document.getElementById('reset-btn').addEventListener('click', () => {
     stopAutoPlay();
     // Update config from UI before starting
     gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
+    if (document.getElementById('chain-lock-prob-input')) {
+        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
+    }
     startGame();
 });
 autoBtn.addEventListener('click', () => {
