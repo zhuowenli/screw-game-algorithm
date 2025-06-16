@@ -1124,7 +1124,8 @@ function spawnComponentPlate(component) {
     const availableCells = [];
     for (let r = area.row; r < area.row + area.height; r++) {
         for (let c = area.col; c < area.col + area.width; c++) {
-            if (cellMap[r] && cellMap[r][c] && !cellMap[r][c].dataset.componentId) {
+            // Check if the cell exists and is not occupied BY ANOTHER component's plate
+            if (cellMap[r] && cellMap[r][c] && !cellMap[r][c].dataset.plateId) {
                 availableCells.push(cellMap[r][c]);
             }
         }
@@ -1138,12 +1139,12 @@ function spawnComponentPlate(component) {
     for (const screw of plate.screws) {
         const cell = availableCells.pop();
         if (!cell) {
-            console.error('No available cells in component area for screw');
+            console.error('在组件区域内找不到可用单元格来放置螺丝。');
             continue;
         }
         screw.cell = cell;
         cell.dataset.plateId = plate.id;
-        cell.dataset.componentId = component.id;
+        cell.dataset.componentId = String(component.id);
         const dot = spawnDot(screw, cell);
         dot.style.zIndex = 20;
         screw.dot = dot;
@@ -2120,7 +2121,12 @@ function countBoardColors() {
 function spawnComponent(component) {
     if (!component || component.isSpawned) return false;
 
-    // Build the current occupied grid on-the-fly
+    const config = gameConfig.COMPONENT_CONFIG[component.type];
+    const neededWidth = config.size.width;
+    const neededHeight = config.size.height;
+    let foundSpot = false;
+    let area;
+
     const occupiedGrid = Array(ROWS)
         .fill(null)
         .map(() => Array(COLS).fill(false));
@@ -2134,17 +2140,18 @@ function spawnComponent(component) {
         }
     }
 
-    const config = COMPONENT_CONFIG[component.type];
-    let foundSpot = false;
-    let area;
+    // --- Plan A: Try to find a perfect rectangular spot ---
+    const startRow = Math.floor(Math.random() * (ROWS - neededHeight + 1));
+    const startCol = Math.floor(Math.random() * (COLS - neededWidth + 1));
 
-    // Deterministic scan to find a spot
-    for (let r = 0; r <= ROWS - config.size.height; r++) {
-        for (let c = 0; c <= COLS - config.size.width; c++) {
+    for (let r_offset = 0; r_offset < ROWS; r_offset++) {
+        const r = (startRow + r_offset) % (ROWS - neededHeight + 1);
+        for (let c_offset = 0; c_offset < COLS; c_offset++) {
+            const c = (startCol + c_offset) % (COLS - neededWidth + 1);
             let canPlace = true;
-            for (let y = r; y < r + config.size.height; y++) {
-                for (let x = c; x < c + config.size.width; x++) {
-                    if (y >= ROWS || x >= COLS || occupiedGrid[y][x]) {
+            for (let y = r; y < r + neededHeight; y++) {
+                for (let x = c; x < c + neededWidth; x++) {
+                    if (occupiedGrid[y][x]) {
                         canPlace = false;
                         break;
                     }
@@ -2152,7 +2159,7 @@ function spawnComponent(component) {
                 if (!canPlace) break;
             }
             if (canPlace) {
-                area = { row: r, col: c, width: config.size.width, height: config.size.height };
+                area = { row: r, col: c, width: neededWidth, height: neededHeight };
                 foundSpot = true;
                 break;
             }
@@ -2160,15 +2167,48 @@ function spawnComponent(component) {
         if (foundSpot) break;
     }
 
-    if (foundSpot) {
-        component.area = area;
-        component.isSpawned = true;
-        spawnComponentPlate(component);
-        return true;
-    } else {
-        console.warn('找不到产生新组件的位置。', { componentId: component.id });
-        return false;
+    // --- Plan B: Emergency fallback if no perfect spot is found ---
+    if (!foundSpot) {
+        console.warn(`无法为组件 ${component.id} (${component.type}) 找到标准矩形位置。启动紧急随机放置模式。`);
+
+        // Collect all empty cells from the entire board.
+        const allEmptyCells = [];
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (!occupiedGrid[r][c]) {
+                    allEmptyCells.push(cellMap[r][c]);
+                }
+            }
+        }
+
+        const neededScrews = component.plates[0]?.screws.length || 0;
+        if (allEmptyCells.length >= neededScrews) {
+            // Pick a random empty cell as an anchor for our new component area.
+            const anchorCell = allEmptyCells[Math.floor(Math.random() * allEmptyCells.length)];
+            const anchorR = parseInt(anchorCell.dataset.row);
+            const anchorC = parseInt(anchorCell.dataset.col);
+
+            // Define a standard-sized area centered around the anchor as much as possible.
+            // Try to make the anchor cell not be at the very edge of the new area.
+            let r = anchorR - Math.floor(Math.random() * neededHeight);
+            let c = anchorC - Math.floor(Math.random() * neededWidth);
+
+            // Clamp the area to be within the board boundaries.
+            r = Math.max(0, Math.min(r, ROWS - neededHeight));
+            c = Math.max(0, Math.min(c, COLS - neededWidth));
+
+            area = { row: r, col: c, width: neededWidth, height: neededHeight };
+            foundSpot = true;
+        } else {
+            console.error(`紧急放置失败：没有足够的空单元格 (${allEmptyCells.length}) 来放置 ${neededScrews} 个螺丝。`);
+            return false;
+        }
     }
+
+    component.area = area;
+    component.isSpawned = true;
+    spawnComponentPlate(component);
+    return true;
 }
 
 function checkAndReplenishScrews() {
@@ -2192,4 +2232,32 @@ function checkAndReplenishScrews() {
         }
         safetyBreak++;
     }
+}
+
+// ===============================================
+// RESTORED AND IMPROVED Spawning Logic
+// ===============================================
+
+function getBoundingBox(cells) {
+    if (!cells || cells.length === 0) {
+        return { minRow: 0, maxRow: 0, minCol: 0, maxCol: 0, width: 1, height: 1 };
+    }
+    let minRow = Infinity,
+        maxRow = -Infinity,
+        minCol = Infinity,
+        maxCol = -Infinity;
+    cells.forEach((cell) => {
+        const r = parseInt(cell.dataset.row);
+        const c = parseInt(cell.dataset.col);
+        minRow = Math.min(minRow, r);
+        maxRow = Math.max(maxRow, r);
+        minCol = Math.min(minCol, c);
+        maxCol = Math.max(maxCol, c);
+    });
+    return {
+        row: minRow,
+        col: minCol,
+        width: maxCol - minCol + 1,
+        height: maxRow - minRow + 1,
+    };
 }
