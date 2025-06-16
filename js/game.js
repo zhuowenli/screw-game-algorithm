@@ -11,9 +11,10 @@ const gameConfig = {
     // --- 核心玩法 (Core Gameplay) ---
     MAX_TEMP_SLOTS: 5, // 初始临时槽位数量
     MAX_CHAIN_LENGTH: 5, // 锁链的最大长度 (例如 5 表示 A->B->C->D->E)
-    MAX_CONTROLLERS_PER_LOCK: 4, // 单个锁最多能控制的螺丝数量
+    MAX_CONTROLLERS_PER_LOCK: 5, // 单个锁最多能控制的螺丝数量
     MAX_LOCK_GROUPS: 8, // 同一时间场上最多存在的锁定组数量
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
+    MAX_CONTROLLERS: 4, // 最大并联锁数量
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
 
     // --- 初始生成 (Initial Spawning) ---
@@ -97,6 +98,7 @@ let TOTAL_SCREWS = TOTAL_BOXES * 3;
 let MAX_VISIBLE_PLATES = 4; // 同时最多显示的板块数量
 const MAX_CHAIN_LENGTH = gameConfig.MAX_CHAIN_LENGTH;
 let MAX_LOCK_GROUPS = gameConfig.MAX_LOCK_GROUPS;
+let MAX_CONTROLLERS = gameConfig.MAX_CONTROLLERS;
 let MAX_CONTROLLERS_PER_LOCK = gameConfig.MAX_CONTROLLERS_PER_LOCK;
 let MAX_TEMP_SLOTS = gameConfig.MAX_TEMP_SLOTS;
 // 记录最近一次拔出螺丝的格子
@@ -135,7 +137,6 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         tempSlots: 5, // 临时槽位保持不变
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
-        maxControllers: interpolate(1, 4, NUM_DIFFICULTY_LEVELS, i), // 并联锁数量(广度): 从1个平滑增加到4个
         chainLockProbability: parseFloat((interpolate(30, 80, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到80%
     });
 }
@@ -1740,7 +1741,7 @@ function startGame() {
 
         // --- 应用锁算法配置 ---
         MAX_LOCK_GROUPS = settings.maxLockGroups;
-        MAX_CONTROLLERS_PER_LOCK = settings.maxControllers;
+        MAX_CONTROLLERS_PER_LOCK = gameConfig.MAX_CONTROLLERS;
         gameConfig.CHAIN_LOCK_PROBABILITY = settings.chainLockProbability;
 
         // --- 同步UI输入框 (可选, 但保持一致性是好习惯) ---
@@ -1748,6 +1749,7 @@ function startGame() {
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
         document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
+        document.getElementById('max-controllers').value = gameConfig.MAX_CONTROLLERS;
     } else {
         // Fallback to manual UI config if something goes wrong
         TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
@@ -1874,6 +1876,9 @@ function updateInputsWithDifficulty(difficulty) {
         if (document.getElementById('chain-lock-prob-input')) {
             document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
         }
+        if (document.getElementById('max-controllers')) {
+            document.getElementById('max-controllers').value = gameConfig.MAX_CONTROLLERS;
+        }
     }
 }
 
@@ -1910,6 +1915,9 @@ document.getElementById('start-btn').addEventListener('click', () => {
     if (document.getElementById('chain-lock-prob-input')) {
         gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
     }
+    if (document.getElementById('max-controllers')) {
+        gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
+    }
     startGame();
 });
 document.getElementById('reset-btn').addEventListener('click', () => {
@@ -1918,6 +1926,9 @@ document.getElementById('reset-btn').addEventListener('click', () => {
     gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     if (document.getElementById('chain-lock-prob-input')) {
         gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
+    }
+    if (document.getElementById('max-controllers')) {
+        gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
     }
     startGame();
 });
