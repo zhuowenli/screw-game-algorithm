@@ -1905,6 +1905,9 @@ document.getElementById('start-btn').addEventListener('click', () => {
     if (document.getElementById('max-controllers')) {
         gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
     }
+    if (document.getElementById('box-ai-threshold-input')) {
+        gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
+    }
     startGame();
 });
 document.getElementById('reset-btn').addEventListener('click', () => {
@@ -1916,6 +1919,9 @@ document.getElementById('reset-btn').addEventListener('click', () => {
     }
     if (document.getElementById('max-controllers')) {
         gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
+    }
+    if (document.getElementById('box-ai-threshold-input')) {
+        gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
     }
     startGame();
 });
@@ -1934,6 +1940,11 @@ addTempSlotBtn.addEventListener('click', () => {
 });
 createDifficultyButtons();
 updateInputsWithDifficulty(selectedDifficulty);
+
+if (document.getElementById('box-ai-threshold-input')) {
+    document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
+}
+
 startGame();
 
 function weightedRandom(colors, weights) {
@@ -1949,6 +1960,13 @@ function weightedRandom(colors, weights) {
     return validColors.length > 0 ? validColors[validColors.length - 1] : colors[colors.length - 1];
 }
 
+/**
+ * 设置盒子颜色
+ *
+ * @param {*} box
+ * @param {boolean} [isManualAdd=false]
+ * @returns
+ */
 function setupBox(box, isManualAdd = false) {
     const allColorStats = getColorStats();
 
@@ -2015,21 +2033,27 @@ function setupBox(box, isManualAdd = false) {
     lastCompletedColor = null;
     // --- 冷却逻辑结束 ---
 
-    // 3. Prioritized Selection: Choose the best color from the dynamic candidates.
+    // 3. 关键算法：选择最佳颜色盒子
     const progress = getProgress();
     let bestColor = null;
 
     let strategicColors = [];
     if (isManualAdd) {
+        console.log('==================');
+        console.log('手动模式(优先选择临时槽颜色螺丝):', isManualAdd);
         const tempSlotColors = tempSlotsState.filter((d) => d).map((d) => d.dataset.color);
         strategicColors = [...new Set(tempSlotColors)].filter((c) => turnCandidates.includes(c));
     } else if (progress < gameConfig.BOX_AI_CHALLENGE_THRESHOLD) {
+        console.log('==================');
+        console.log('新手模式(获取颜色数量>=3的螺丝):', progress, gameConfig.BOX_AI_CHALLENGE_THRESHOLD);
         // Early Game: Helpful colors
         strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
-            return stats && stats.onBoardUnlocked + stats.inTemp >= 3;
+            return stats && stats.onBoardUnlocked + stats.onBoardLocked + stats.inTemp + stats.inBox >= 3;
         });
     } else {
+        console.log('==================');
+        console.log('挑战模式(获取颜色数量>=3且被锁住的螺丝):', progress, gameConfig.BOX_AI_CHALLENGE_THRESHOLD);
         // Late Game: Challenging colors ("严师") - REFINED LOGIC
         // 优先选择那些"可解但被锁住"的颜色
         // 条件1: 场上该颜色总数 >= 3 (保证可解性)
@@ -2039,11 +2063,12 @@ function setupBox(box, isManualAdd = false) {
             return (
                 stats &&
                 stats.onBoardLocked > 0 &&
-                stats.onBoardUnlocked + stats.inTemp + stats.inBox < 3 &&
+                stats.onBoardUnlocked + stats.inTemp < 3 &&
                 stats.onBoardUnlocked + stats.onBoardLocked + stats.inTemp + stats.inBox >= 3
             );
         });
     }
+    console.log('strategicColors:', strategicColors);
 
     // Priority 1: A strategic color that is not a duplicate on the board.
     const p1 = strategicColors.find((c) => !usedBoxColors.has(c));
@@ -2408,4 +2433,3 @@ function updateDifficultyInfoDisplay(level) {
 createDifficultyButtons();
 setupDifficultyInfoPanel();
 updateDifficultyInfoDisplay(selectedDifficulty);
-startGame();

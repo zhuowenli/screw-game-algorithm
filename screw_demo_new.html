@@ -276,10 +276,12 @@
 <body>
     <div id="settings-panel">
         <div>
-            <label>螺丝盒总数:<input id="box-count" type="number" value="50" min="1"></label>
+            <label for="box-count">螺丝盒总数:</label>
+            <input id="box-count" type="number" value="50" min="1" max="1000">
         </div>
         <div>
-            <label>螺丝颜色数:<input id="color-count-input" type="number" value="7" min="1" max="10"></label>
+            <label for="color-count-input">螺丝颜色数:</label>
+            <input id="color-count-input" type="number" value="7" min="1" max="10">
         </div>
         <div>
             <label for="temp-count">临时槽:</label>
@@ -290,12 +292,16 @@
             <input type="number" id="min-onboard-screws" value="15" min="5" max="50">
         </div>
         <div>
-            <label for="chain-lock-prob-input">链式锁概率:</label>
+            <label for="max-controllers">最大并联锁数量:</label>
+            <input type="number" id="max-controllers" value="4" min="1" max="10">
+        </div>
+        <div>
+            <label for="chain-lock-prob-input">链式锁概率(0-1):</label>
             <input type="number" id="chain-lock-prob-input" value="0.37" min="0.00" max="1.00">
         </div>
         <div>
-            <label for="max-controllers">最大并联锁数量:</label>
-            <input type="number" id="max-controllers" value="4" min="1" max="10">
+            <label for="box-ai-threshold-input">AI挑战阈值(0-1):</label>
+            <input type="number" id="box-ai-threshold-input" value="0.5" min="0.00" max="1.00">
         </div>
         <div>
             <label>难度选择:</label>
