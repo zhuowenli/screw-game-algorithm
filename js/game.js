@@ -135,7 +135,7 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         tempSlots: 5, // 临时槽位保持不变
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
-        chainLockProbability: parseFloat((interpolate(30, 80, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到80%
+        chainLockProbability: parseFloat((interpolate(40, 80, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到80%
     });
 }
 
@@ -1054,8 +1054,6 @@ function setupLocks(newScrews) {
                 currentGroups.add(locked.id);
             }
         }
-
-        console.log('currentGroups', currentGroups);
 
         // Deadlock prevention logic
         const totalScrewsInComponent = componentScrews.length;
@@ -2398,9 +2396,9 @@ function updateDifficultyInfoDisplay(level) {
         <ul>
             <li><strong>螺丝颜色种类:</strong> ${settings.colors}</li>
             <li><strong>螺丝盒子总数:</strong> ${settings.boxes}</li>
-            <li><strong>最大锁定组数:</strong> ${settings.maxLockGroups} (场上总锁组)</li>
-            <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% (锁的深度)</li>
             <li><strong>最小在场螺丝数:</strong> ${gameConfig.MIN_ONBOARD_SCREWS} (低于此值则补充)</li>
+            <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% </li>
+            <li><strong>最大锁定螺丝数:</strong> ${settings.maxLockGroups} </li>
         </ul>
     `;
     panel.innerHTML = infoHTML;
