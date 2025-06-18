@@ -15,6 +15,7 @@ const gameConfig = {
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     MAX_CONTROLLERS: 4, // 最大并联锁数量
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
+    TEMP_SLOT_WEIGHT_FACTOR: 1.5, // 临时槽中颜色影响盒子生成的权重因子
 
     // 新增：并联锁动态难度配置
     MULTI_LOCK_STAGES: [
@@ -1756,6 +1757,9 @@ function startGame() {
     if (document.getElementById('box-ai-threshold-input')) {
         gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
     }
+    if (document.getElementById('temp-slot-weight')) {
+        gameConfig.TEMP_SLOT_WEIGHT_FACTOR = parseFloat(document.getElementById('temp-slot-weight').value);
+    }
 
     // 新增：读取并联锁阶段配置
     if (document.getElementById('multi-lock-threshold-1')) {
@@ -1947,6 +1951,9 @@ updateInputsWithDifficulty(selectedDifficulty);
 if (document.getElementById('box-ai-threshold-input')) {
     document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
 }
+if (document.getElementById('temp-slot-weight')) {
+    document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
+}
 
 startGame();
 
@@ -2081,30 +2088,80 @@ function setupBox(box, isManualAdd = false) {
         bestColor = p1;
     }
 
-    // 优先级2：任何一个不重复的颜色。
+    // [重构] 优先级2：根据临时槽颜色进行加权随机选择（在非重复颜色中）
     if (!bestColor) {
-        const p2 = turnCandidates.find((c) => !usedBoxColors.has(c));
-        if (p2) {
-            bestColor = p2;
+        const nonDuplicateCandidates = turnCandidates.filter((c) => !usedBoxColors.has(c));
+        if (nonDuplicateCandidates.length > 0) {
+            const tempSlotCounts = {};
+            tempSlotsState.forEach((dot) => {
+                if (dot) {
+                    const color = dot.dataset.color;
+                    tempSlotCounts[color] = (tempSlotCounts[color] || 0) + 1;
+                }
+            });
+
+            const weights = {};
+            nonDuplicateCandidates.forEach((c) => {
+                const tempWeight = (tempSlotCounts[c] || 0) * gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
+                weights[c] = 1 + tempWeight; // 基础权重1 + 额外权重
+            });
+
+            console.log('========================================================');
+            console.log('优先级2：根据临时槽颜色进行加权随机选择（在非重复颜色中）');
+            console.log('临时槽位权重:', weights);
+            console.log('nonDuplicateCandidates:', nonDuplicateCandidates);
+
+            bestColor = weightedRandom(nonDuplicateCandidates, weights);
+            console.log('bestColor:', bestColor);
+            console.log('========================================================');
         }
     }
 
     // 优先级3：一个重复的策略性颜色（强制选择）。
     if (!bestColor) {
-        if (strategicColors.length > 0) {
-            bestColor = strategicColors[0];
+        // 确保选择的策略性颜色确实是当前回合的候选颜色之一
+        const p3 = strategicColors.find((c) => turnCandidates.includes(c));
+        if (p3) {
+            bestColor = p3;
         }
     }
 
     // 优先级4：最终的备用选项，直接选择第一个可用的候选颜色。
     if (!bestColor) {
+        // 在所有候选中进行加权随机，作为最后的智能选择
+        const finalWeights = {};
+        const tempSlotCounts = {};
+        tempSlotsState.forEach((dot) => {
+            if (dot) {
+                const color = dot.dataset.color;
+                tempSlotCounts[color] = (tempSlotCounts[color] || 0) + 1;
+            }
+        });
+        turnCandidates.forEach((c) => {
+            const tempWeight = (tempSlotCounts[c] || 0) * gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
+            finalWeights[c] = 1 + tempWeight;
+        });
+        bestColor = weightedRandom(turnCandidates, finalWeights);
+    }
+
+    // 终极保险：如果所有逻辑都失败了，就选第一个
+    if (!bestColor && turnCandidates.length > 0) {
         bestColor = turnCandidates[0];
     }
 
     // 4. 最终处理
+    if (!bestColor) {
+        // 如果到这里依然没有颜色，说明确实没有可选的了
+        box.dataset.enabled = 'false';
+        box.classList.remove('enabled');
+        box.style.borderColor = '#ccc';
+        box.innerHTML = '<div class="hint">无</div>';
+        return;
+    }
+
     const indexInMainQueue = boxColorQueue.indexOf(bestColor);
     if (indexInMainQueue === -1) {
-        // 这是一个逻辑错误，但需要优雅地处理。盒子将显示为空。
+        // This is a logic error, but handle it gracefully. The box will appear empty.
         console.error('逻辑错误：选择的颜色不在主队列中。', {
             bestColor: bestColor,
             turnCandidates: turnCandidates,
@@ -2468,6 +2525,9 @@ updateDifficultyInfoDisplay(selectedDifficulty);
 
 if (document.getElementById('box-ai-threshold-input')) {
     document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
+}
+if (document.getElementById('temp-slot-weight')) {
+    document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
 }
 
 startGame();
