@@ -10,6 +10,7 @@
             background: #f8f8f8;
             text-align: center;
             padding: 20px;
+            margin: 0;
         }
 
         h1 {
@@ -175,7 +176,7 @@
         #info-panel {
             position: fixed;
             right: 20px;
-            top: 100px;
+            top: 20px;
             width: 200px;
             text-align: left;
             background: #ccc;
@@ -188,7 +189,7 @@
         #settings-panel {
             position: fixed;
             left: 20px;
-            top: 100px;
+            top: 20px;
             width: 310px;
             text-align: left;
             background: #ccc;
@@ -196,6 +197,8 @@
             padding: 5px;
             box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
             font-size: 14px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
         }
 
         #info-panel span {
@@ -215,6 +218,10 @@
 
         #difficulty-panel {
             margin-top: 30px;
+            position: fixed;
+            right: 20px;
+            top: 400px;
+            width: 400px;
         }
 
         #difficulty-text {
@@ -272,10 +279,8 @@
         }
 
         .config-group {
-            border: 1px solid #ccc;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 5px;
+            padding: 2px;
+            margin-bottom: 8px;
         }
 
         .config-group h4 {
@@ -283,33 +288,53 @@
             margin-bottom: 10px;
         }
 
+        .config-group small {
+            display: flex;
+        }
+
         .config-group div {
             margin-bottom: 5px;
         }
 
         .config-group input {
-            width: 60px;
+            width: 38px;
+        }
+
+        #dynamic-difficulty-stages-container input::-webkit-outer-spin-button,
+        #dynamic-difficulty-stages-container input::-webkit-inner-spin-button {
+            -webkit-appearance: none !important;
         }
     </style>
 </head>
 
 <body>
     <div id="settings-panel">
-        <div>
-            <label for="box-count">螺丝盒总数:</label>
-            <input id="box-count" type="number" value="50" min="1" max="1000">
+        <div class="config-group">
+            <h4>螺丝配置:</h4>
+            <div>
+                <label for="box-count">螺丝盒总数:</label>
+                <input id="box-count" type="number" value="50" min="1" max="1000">
+            </div>
+            <div>
+                <label for="color-count-input">螺丝颜色数:</label>
+                <input id="color-count-input" type="number" value="7" min="1" max="10">
+            </div>
+            <div>
+                <label for="min-onboard-screws">场上最少螺丝:</label>
+                <input type="number" id="min-onboard-screws" value="15" min="5" max="50">
+            </div>
         </div>
-        <div>
-            <label for="color-count-input">螺丝颜色数:</label>
-            <input id="color-count-input" type="number" value="7" min="1" max="10">
-        </div>
-        <div>
-            <label for="temp-count">临时槽:</label>
-            <input type="number" id="temp-count" value="5" min="1" max="10">
-        </div>
-        <div>
-            <label for="min-onboard-screws">场上最少螺丝:</label>
-            <input type="number" id="min-onboard-screws" value="15" min="5" max="50">
+        <div class="config-group">
+            <h4>临时槽配置:</h4>
+            <div>
+                <label for="temp-count">临时槽数量:</label>
+                <input type="number" id="temp-count" value="5" min="1" max="10">
+            </div>
+            <div>
+                <label for="temp-slot-weight">临时槽螺丝盒生成权重:</label>
+                <input type="number" id="temp-slot-weight" value="1" min="0" max="10" step="0.1">
+                <div>(临时槽中颜色影响盒子生成的权重因子)</div>
+            </div>
         </div>
         <div class="config-group">
             <h4>锁链长度阶段配置:</h4>
@@ -331,17 +356,19 @@
                 <input type="number" id="max-controllers" value="4" min="1" max="10">
             </div>
         </div>
-        <div>
-            <label for="chain-lock-prob-input">链式锁概率(0-1):</label>
-            <input type="number" id="chain-lock-prob-input" value="0.37" min="0.00" max="1.00">
+        <div class="config-group">
+            <h4>动态难度阶段配置:</h4>
+            <div id="dynamic-difficulty-stages-container">
+                <!-- 动态难度阶段将由JS在此生成 -->
+            </div>
         </div>
-        <div>
-            <label for="temp-slot-weight">临时槽权重:</label>
-            <input type="number" id="temp-slot-weight" value="1.5" min="0" max="10" step="0.1">
-        </div>
-        <div>
-            <label for="box-ai-threshold-input">AI挑战阈值(0-1):</label>
-            <input type="number" id="box-ai-threshold-input" value="0.5" min="0.00" max="1.00">
+        <div class="config-group">
+            <h4>AI配置:</h4>
+            <div>
+                <label for="box-ai-threshold-input">挑战模式进度阈值(0-1):</label>
+                <input type="number" id="box-ai-threshold-input" value="0.5" min="0.00" max="1.00">
+                <div>(达到进度提升游戏难度，通过AI制造卡点)</div>
+            </div>
         </div>
         <div>
             <label>难度选择:</label>
@@ -386,11 +413,11 @@
     <div id="difficulty-panel">
         <h2>难度信息</h2>
         <div id="difficulty-text">当前难度:<span id="current-difficulty">-</span></div>
-        <canvas id="difficulty-canvas" width="600" height="200"></canvas>
+        <canvas id="difficulty-canvas" width="400" height="200"></canvas>
     </div>
 
-    <script src='js/game.js'></script>
-    <script src='js/autoplay.js'></script>
+    <script src='./js/game.js'></script>
+    <script src='./js/autoplay.js'></script>
 </body>
 
 </html>

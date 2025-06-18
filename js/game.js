@@ -15,7 +15,7 @@ const gameConfig = {
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     MAX_CONTROLLERS: 4, // 最大并联锁数量
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
-    TEMP_SLOT_WEIGHT_FACTOR: 1.5, // 临时槽中颜色影响盒子生成的权重因子
+    TEMP_SLOT_WEIGHT_FACTOR: 1, // 临时槽中颜色影响盒子生成的权重因子
 
     // 新增：并联锁动态难度配置
     MULTI_LOCK_STAGES: [
@@ -33,26 +33,13 @@ const gameConfig = {
 
     // --- 动态难度 (Dynamic Difficulty) ---
     // 根据游戏进度(progress)划分的难度阶梯
-    DIFFICULTY_STAGES: {
-        STAGE_0_PROGRESS: 0.1, // 阶段0: 新手期进度上限
-        STAGE_1_PROGRESS: 0.2, // 阶段1: 普通期进度上限
-        STAGE_2_PROGRESS: 0.4, // 阶段2: 紧张期进度上限
-        STAGE_3_PROGRESS: 0.6, // 阶段3: 危险期进度上限
-
-        // 每个阶段对应的具体难度修正值
-        MODIFIERS: [
-            // 阶段0 (新手): 极低的锁概率
-            { lockProbFactor: 0.3, connectionMultiplier: 1.0, extraConnections: 0 },
-            // 阶段1 (普通): 正常难度
-            { lockProbFactor: 1.0, connectionMultiplier: 1.0, extraConnections: 0 },
-            // 阶段2 (紧张): 难度略微提升
-            { lockProbFactor: 1.5, connectionMultiplier: 1.2, extraConnections: 0 },
-            // 阶段3 (危险): 难度显著提升
-            { lockProbFactor: 2.0, connectionMultiplier: 1.5, extraConnections: 1 },
-            // 阶段4 (最终): 最高难度，可用于触发提示
-            { lockProbFactor: 2.5, connectionMultiplier: 1.5, extraConnections: 2 },
-        ],
-    },
+    DIFFICULTY_STAGES: [
+        { progressThreshold: 0.1, lockProbFactor: 0.2, connectionMultiplier: 1.0 }, // 阶段 0
+        { progressThreshold: 0.2, lockProbFactor: 0.3, connectionMultiplier: 1.0 }, // 阶段 1
+        { progressThreshold: 0.4, lockProbFactor: 0.4, connectionMultiplier: 1.2 }, // 阶段 2
+        { progressThreshold: 0.6, lockProbFactor: 0.5, connectionMultiplier: 1.5 }, // 阶段 3
+        { progressThreshold: 1.0, lockProbFactor: 0.7, connectionMultiplier: 1.5 }, // 阶段 4 (最终)
+    ],
 
     // --- "智能"盒子生成AI (Intelligent Box AI) ---
     BOX_AI_CHALLENGE_THRESHOLD: 0.5, // 游戏进度超过此值，盒子AI会从"帮助者"变为"挑战者"
@@ -142,7 +129,6 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         tempSlots: 5, // 临时槽位保持不变
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
-        chainLockProbability: parseFloat((interpolate(40, 80, NUM_DIFFICULTY_LEVELS, i) / 100).toFixed(2)), // 链式锁概率(深度): 从30%平滑增加到80%
     });
 }
 
@@ -883,23 +869,13 @@ function getStageModifiers() {
     const progress = getProgress();
     const stages = gameConfig.DIFFICULTY_STAGES;
 
-    if (progress < stages.STAGE_0_PROGRESS) {
-        return { ...stages.MODIFIERS[0], hint: '' };
+    for (const stage of stages) {
+        if (progress < stage.progressThreshold) {
+            return { ...stage, hint: '' };
+        }
     }
-    if (progress < stages.STAGE_1_PROGRESS) {
-        return { ...stages.MODIFIERS[1], hint: '' };
-    }
-    if (progress < stages.STAGE_2_PROGRESS) {
-        return { ...stages.MODIFIERS[2], hint: '' };
-    }
-    if (progress < stages.STAGE_3_PROGRESS) {
-        return { ...stages.MODIFIERS[3], hint: '' };
-    }
-    // 阶段4：可作为商业化切入点
-    return {
-        ...stages.MODIFIERS[4],
-        // hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
-    };
+    // 如果进度超过所有阈值，则返回最后一个阶段的配置
+    return { ...stages[stages.length - 1], hint: '' };
 }
 
 /**
@@ -960,15 +936,12 @@ function planBoxes(totalBoxes, availableColors) {
  */
 function setupLocks(newScrews) {
     console.log('设置锁定关系', newScrews);
-    const free = tempSlotsState.filter((d) => d === null).length;
-    const { lockProbFactor, connectionMultiplier, extraConnections, hint } = getStageModifiers();
+    const { lockProbFactor, connectionMultiplier, hint } = getStageModifiers();
 
     if (hint && !hintMessageShown) {
         showMessage(hint);
         hintMessageShown = true; // 确保消息每局只显示一次
     }
-
-    const baseProb = Math.min(0.8, 0.2 + free * 0.1);
 
     const screwsByComponent = {};
     if (!newScrews) return;
@@ -1021,8 +994,7 @@ function setupLocks(newScrews) {
 
             // --- GATE 1: SHOULD we lock this screw? ---
             const mustLock = needyColors.has(locked.color);
-            const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
-            const shouldLockProbabilistically = Math.random() <= finalProb;
+            const shouldLockProbabilistically = Math.random() <= lockProbFactor;
 
             console.log('1. 是否锁定螺丝', 'mustLock:', mustLock, 'shouldLockProbabilistically:', shouldLockProbabilistically);
             if (!mustLock && !shouldLockProbabilistically) {
@@ -1039,18 +1011,15 @@ function setupLocks(newScrews) {
             const chainableControllers = allPotentialControllers.filter((c) => c.locked); // 已经是锁定状态的控制器
             const multiLockControllers = allPotentialControllers.filter((c) => !c.locked); // 未被锁定的自由控制器
 
-            const preferChainLock = Math.random() < gameConfig.CHAIN_LOCK_PROBABILITY;
             const limit = getLockControllerLimit();
 
-            console.log('preferChainLock:', preferChainLock);
             console.log('chainableControllers:', chainableControllers);
 
             // 新增：筛选出符合长度限制的链式控制器
             const validChainControllers = chainableControllers.filter((c) => getLockDepth(c) < limit);
 
-            if (preferChainLock && validChainControllers.length > 0) {
+            if (validChainControllers.length > 0) {
                 console.log('2.1 创建链式锁');
-                console.log('preferChainLock:', preferChainLock);
                 console.log('chainableControllers:', validChainControllers);
                 // --- A) 创建链式锁 ---
                 validChainControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
@@ -1069,7 +1038,6 @@ function setupLocks(newScrews) {
                 // [FIXED] 重新引入随机性，确保连接数在 1 到 上限 之间随机
                 let count = 1 + Math.floor(Math.random() * limit);
                 count = Math.round(count * connectionMultiplier);
-                count += extraConnections;
                 // 最终进行强力限制，确保结果永远不会超过当前进度允许的上限
                 count = Math.min(count, multiLockControllers.length, limit);
                 console.log('count:', count);
@@ -1748,9 +1716,6 @@ function startGame() {
     }
 
     // 从 UI 输入框读取剩余的配置
-    if (document.getElementById('chain-lock-prob-input')) {
-        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
-    }
     if (document.getElementById('max-controllers')) {
         gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
     }
@@ -1775,6 +1740,39 @@ function startGame() {
         ];
         // 确保阶段按阈值升序排列
         gameConfig.MULTI_LOCK_STAGES.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    }
+
+    // 新增：读取动态难度配置
+    const newStages = [];
+    const stageRows = document.querySelectorAll('#dynamic-difficulty-stages-container .difficulty-stage-row');
+
+    stageRows.forEach((row) => {
+        const probFactorInput = row.querySelector('.ds-prob-factor');
+        const connMultInput = row.querySelector('.ds-conn-mult');
+        const progressInput = row.querySelector('.ds-progress');
+
+        const isLastStage = !progressInput;
+
+        const stageData = {
+            lockProbFactor: parseFloat(probFactorInput.value),
+            connectionMultiplier: parseFloat(connMultInput.value),
+            progressThreshold: isLastStage ? 1.0 : parseFloat(progressInput.value),
+        };
+        newStages.push(stageData);
+    });
+
+    if (newStages.length > 0) {
+        // 确保阈值是递增的，如果用户配置错误，则进行后台修正
+        for (let i = 0; i < newStages.length - 1; i++) {
+            if (newStages[i].progressThreshold >= newStages[i + 1].progressThreshold) {
+                newStages[i + 1].progressThreshold = parseFloat((newStages[i].progressThreshold + 0.1).toFixed(2));
+            }
+        }
+        // 确保最后一个阶段的阈值总是1.0
+        newStages[newStages.length - 1].progressThreshold = 1.0;
+        gameConfig.DIFFICULTY_STAGES = newStages;
+        // 配置更新后，重新渲染UI以显示修正后的值
+        renderDifficultyStagesUI();
     }
 
     hintMessageShown = false; // 为新游戏重置提示消息标志
@@ -1899,10 +1897,6 @@ function updateInputsWithDifficulty(difficulty) {
         document.getElementById('color-count-input').value = settings.colors;
         document.getElementById('temp-count').value = settings.tempSlots;
         document.getElementById('min-onboard-screws').value = gameConfig.MIN_ONBOARD_SCREWS;
-        // 新增：同步链式锁概率输入框
-        if (document.getElementById('chain-lock-prob-input')) {
-            document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
-        }
         if (document.getElementById('max-controllers')) {
             document.getElementById('max-controllers').value = gameConfig.MAX_CONTROLLERS;
         }
@@ -1954,6 +1948,90 @@ if (document.getElementById('box-ai-threshold-input')) {
 if (document.getElementById('temp-slot-weight')) {
     document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
 }
+
+// 新增：初始化动态难度配置面板的UI
+function renderDifficultyStagesUI() {
+    const container = document.getElementById('dynamic-difficulty-stages-container');
+    if (!container) return;
+    container.innerHTML = ''; // Clear existing rows
+
+    const stages = gameConfig.DIFFICULTY_STAGES;
+
+    stages.forEach((stage, index) => {
+        const row = document.createElement('div');
+        row.className = 'difficulty-stage-row';
+
+        const isLastStage = index === stages.length - 1;
+
+        // 对于最后一个阶段，不显示 "进度 <" 输入框，因为它总是作为最终阶段
+        const progressHTML = isLastStage
+            ? `<span>(最终阶段)</span>`
+            : `进度 &lt; <input type="number" class="ds-progress" value="${stage.progressThreshold.toFixed(2)}" step="0.05" min="0">`;
+
+        row.innerHTML = `
+            <small>
+                <span>${index}:</span>
+                ${progressHTML}
+                &nbsp;概率: <input type="number" class="ds-prob-factor" value="${stage.lockProbFactor.toFixed(2)}" step="0.05" min="0">
+                &nbsp;系数: <input type="number" class="ds-conn-mult" value="${stage.connectionMultiplier.toFixed(2)}" step="0.1" min="0">
+                &nbsp;<button class="add-stage-btn" data-index="${index}">+</button>
+                &nbsp;<button class="remove-stage-btn" data-index="${index}" ${stages.length === 1 ? 'disabled' : ''}>-</button>
+            </small>
+        `;
+
+        container.appendChild(row);
+    });
+
+    // 为按钮绑定事件监听器
+    container.querySelectorAll('.add-stage-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index, 10);
+            addDifficultyStage(index);
+        });
+    });
+
+    container.querySelectorAll('.remove-stage-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index, 10);
+            removeDifficultyStage(index);
+        });
+    });
+}
+
+function addDifficultyStage(index) {
+    const stages = gameConfig.DIFFICULTY_STAGES;
+    // 创建一个新阶段，作为当前阶段的副本
+    const newStage = JSON.parse(JSON.stringify(stages[index]));
+
+    // 自动为新阶段设置一个合理的、递增的阈值
+    if (index < stages.length - 1) {
+        newStage.progressThreshold = (stages[index].progressThreshold + stages[index + 1].progressThreshold) / 2;
+    } else {
+        // 如果在最后添加，则将当前最后阶段的阈值变小，新阶段成为新的最终阶段
+        stages[index].progressThreshold = Math.min(0.9, parseFloat((stages[index].progressThreshold - 0.1).toFixed(2)));
+        newStage.progressThreshold = 1.0; // 新阶段是最终阶段
+    }
+    // 确保值是两位小数
+    newStage.progressThreshold = parseFloat(newStage.progressThreshold.toFixed(2));
+
+    stages.splice(index + 1, 0, newStage);
+    // 重新排序以防万一
+    stages.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    renderDifficultyStagesUI(); // 重新渲染整个UI
+}
+
+function removeDifficultyStage(index) {
+    const stages = gameConfig.DIFFICULTY_STAGES;
+    if (stages.length > 1) {
+        stages.splice(index, 1);
+        stages[stages.length - 1].progressThreshold = 1.0; // 确保最后一个总是最终阶段
+        renderDifficultyStagesUI(); // 重新渲染
+    } else {
+        alert('至少需要一个难度阶段。');
+    }
+}
+
+renderDifficultyStagesUI();
 
 startGame();
 
@@ -2089,6 +2167,7 @@ function setupBox(box, isManualAdd = false) {
     }
 
     // [重构] 优先级2：根据临时槽颜色进行加权随机选择（在非重复颜色中）
+    const tempSlotCount = tempSlotsState.filter((d) => d).length;
     if (!bestColor) {
         const nonDuplicateCandidates = turnCandidates.filter((c) => !usedBoxColors.has(c));
         if (nonDuplicateCandidates.length > 0) {
@@ -2106,14 +2185,14 @@ function setupBox(box, isManualAdd = false) {
                 weights[c] = 1 + tempWeight; // 基础权重1 + 额外权重
             });
 
-            console.log('========================================================');
-            console.log('优先级2：根据临时槽颜色进行加权随机选择（在非重复颜色中）');
-            console.log('临时槽位权重:', weights);
-            console.log('nonDuplicateCandidates:', nonDuplicateCandidates);
-
-            bestColor = weightedRandom(nonDuplicateCandidates, weights);
-            console.log('bestColor:', bestColor);
-            console.log('========================================================');
+            if (tempSlotCount > 0) {
+                bestColor = weightedRandom(nonDuplicateCandidates, weights);
+            } else {
+                const p2 = turnCandidates.find((c) => !usedBoxColors.has(c));
+                if (p2) {
+                    bestColor = p2;
+                }
+            }
         }
     }
 
@@ -2511,7 +2590,6 @@ function updateDifficultyInfoDisplay(level) {
             <li><strong>螺丝颜色种类:</strong> ${settings.colors}</li>
             <li><strong>螺丝盒子总数:</strong> ${settings.boxes}</li>
             <li><strong>最小在场螺丝数:</strong> ${gameConfig.MIN_ONBOARD_SCREWS} (低于此值则补充)</li>
-            <li><strong>锁生成概率:</strong> ${Math.round(settings.chainLockProbability * 100)}% </li>
             <li><strong>最大锁定螺丝数:</strong> ${settings.maxLockGroups} </li>
         </ul>
     `;
