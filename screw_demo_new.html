@@ -189,11 +189,11 @@
             position: fixed;
             left: 20px;
             top: 100px;
-            width: 200px;
+            width: 310px;
             text-align: left;
             background: #ccc;
             border: 1px solid #aaa;
-            padding: 10px;
+            padding: 5px;
             box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
             font-size: 14px;
         }
@@ -270,6 +270,26 @@
             color: #fff;
             border-color: #007bff;
         }
+
+        .config-group {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+
+        .config-group h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        .config-group div {
+            margin-bottom: 5px;
+        }
+
+        .config-group input {
+            width: 60px;
+        }
     </style>
 </head>
 
@@ -291,9 +311,25 @@
             <label for="min-onboard-screws">场上最少螺丝:</label>
             <input type="number" id="min-onboard-screws" value="15" min="5" max="50">
         </div>
-        <div>
-            <label for="max-controllers">最大并联锁数量:</label>
-            <input type="number" id="max-controllers" value="4" min="1" max="10">
+        <div class="config-group">
+            <h4>锁链长度阶段配置:</h4>
+            <div>
+                <label>阶段1: 进度 &lt; </label>
+                <input type="number" id="multi-lock-threshold-1" value="0.3" min="0" max="1" step="0.1">
+                <label> → 限制 </label>
+                <input type="number" id="multi-lock-limit-1" value="2" min="1" max="10">
+            </div>
+            <div>
+                <label>阶段2: 进度 &lt; </label>
+                <input type="number" id="multi-lock-threshold-2" value="0.7" min="0" max="1" step="0.1">
+                <label> → 限制 </label>
+                <input type="number" id="multi-lock-limit-2" value="3" min="1" max="10">
+            </div>
+            <div>
+                <label>阶段3: </label>
+                <label> 限制 </label>
+                <input type="number" id="max-controllers" value="4" min="1" max="10">
+            </div>
         </div>
         <div>
             <label for="chain-lock-prob-input">链式锁概率(0-1):</label>
@@ -307,7 +343,6 @@
             <label>难度选择:</label>
             <div id="difficulty-buttons"></div>
         </div>
-        <button id="start-btn">开始游戏</button>
         <button id="reset-btn">重置游戏</button>
         <button id="auto-btn">自动玩</button>
     </div>
@@ -351,6 +386,7 @@
     </div>
 
     <script src='js/game.js'></script>
+    <script src='js/autoplay.js'></script>
 </body>
 
 </html>

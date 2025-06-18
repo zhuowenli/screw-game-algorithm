@@ -16,6 +16,12 @@ const gameConfig = {
     MAX_CONTROLLERS: 4, // 最大并联锁数量
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
 
+    // 新增：并联锁动态难度配置
+    MULTI_LOCK_STAGES: [
+        { progressThreshold: 0.3, controllerLimit: 2 },
+        { progressThreshold: 0.7, controllerLimit: 3 },
+    ],
+
     // --- 初始生成 (Initial Spawning) ---
     // 定义游戏开始时，默认生成的各类板块数量
     INITIAL_SPAWN_COUNTS: {
@@ -112,13 +118,13 @@ const COMPONENT_CONFIG = gameConfig.COMPONENT_CONFIG;
 let components = [];
 let nextComponentId = 0;
 
-// Global scope for getColorTier so it can be used by generateComponents
+// 将getColorTier置于全局作用域，以便generateComponents可以调用
 const colorTiers = { tier1: [], tier2: [], tier3: [] };
 const getColorTier = (color) => {
     if (colorTiers.tier1.includes(color)) return 1;
     if (colorTiers.tier2.includes(color)) return 2;
     if (colorTiers.tier3.includes(color)) return 3;
-    return 4; // Should not happen
+    return 4; // 正常情况下不应发生
 };
 
 function interpolate(start, end, steps, step) {
@@ -193,12 +199,12 @@ function generateComponents(screwColorPlan) {
         const comp = {
             id: nextComponentId++,
             type: type,
-            area: null, // Position is NOT determined here
+            area: null, // 此处不决定位置
             plates: [],
             currentPlateIndex: 0,
             isComplete: false,
-            isSpawned: false, // NEW STATE
-            priority: Infinity, // NEW: For sorting
+            isSpawned: false, // 新增状态
+            priority: Infinity, // 新增：用于排序
             domElements: {},
         };
 
@@ -247,14 +253,14 @@ function generateComponents(screwColorPlan) {
 
     // 2. Create Medium Components
     const medConfig = COMPONENT_CONFIG.MEDIUM;
-    const medCount = Math.max(1, medConfig.count() - (1 + Math.floor(Math.random() * 2))); // Create 1 or 2 fewer
+    const medCount = Math.max(1, medConfig.count() - (1 + Math.floor(Math.random() * 2))); // 少生成1或2个
     for (let i = 0; i < medCount; i++) {
         if (plan.length === 0) break;
         const medComp = createComponentFromPlan('MEDIUM', medConfig);
         if (medComp) components.push(medComp);
     }
 
-    // 3. Create Small Components with ALL remaining screws. This is the "兜底".
+    // 3. 用所有剩余的螺丝创建小组件。这是"兜底"机制。
     const smallConfig = COMPONENT_CONFIG.SMALL;
     while (plan.length > 0) {
         const smallComp = createComponentFromPlan('SMALL', smallConfig);
@@ -265,11 +271,11 @@ function generateComponents(screwColorPlan) {
         }
     }
 
-    // Sort components by priority to ensure staged rollout of colors
+    // 根据优先级对组件进行排序，以确保颜色分阶段出现
     components.sort((a, b) => a.priority - b.priority);
 
     if (plan.length > 0) {
-        console.error('CRITICAL: generateComponents failed to consume the entire plan.', { remaining: plan.length });
+        console.error('严重错误: generateComponents 未能消耗所有计划中的螺丝。', { remaining: plan.length });
         throw new Error('未能用完所有计划中的螺丝。');
     }
 }
@@ -555,8 +561,8 @@ function removePlateDOM(plate) {
 }
 
 function updateDotBlockStates() {
-    // This function is now deprecated as per new requirements.
-    // Screws are always clickable unless logically locked.
+    // 根据新需求，此函数已弃用。
+    // 螺丝现在总是可点击的，除非被逻辑锁定。
     for (const id in screwMap) {
         const screw = screwMap[id];
         if (!screw.dot) continue;
@@ -571,7 +577,7 @@ function updateDotBlockStates() {
  * 移除无效的锁定关系，保持游戏状态一致性
  */
 function cleanupOrphanLocks() {
-    // Remove connections that reference missing screws or dots
+    // 移除引用了不存在的螺丝或点的连接
     lockConnections = lockConnections.filter((conn) => {
         const valid = conn.controller && conn.locked && conn.controller.dot && conn.locked.dot;
         if (!valid) {
@@ -600,7 +606,7 @@ function cleanupOrphanLocks() {
         return valid;
     });
 
-    // Break pairs of screws locked to each other
+    // 断开相互锁定的螺丝对
     const mutual = new Set();
     for (const conn of lockConnections) {
         const partner = lockConnections.find((c) => c.controller === conn.locked && c.locked === conn.controller);
@@ -648,22 +654,22 @@ function cleanupOrphanLocks() {
         lockConnections = lockConnections.filter((c) => !mutual.has(c));
     }
 
-    // NEW: Find and break longer cycles (e.g., A -> B -> C -> A)
+    // 新增：查找并断开更长的循环（例如 A -> B -> C -> A）
     for (const conn of lockConnections) {
         let current = conn.controller;
         let depth = 0;
         while (current) {
             if (current === conn.locked) {
-                // Cycle detected!
+                // 检测到循环！
                 console.warn(`检测到锁循环并自动断开: ${conn.controller.id} -> ${conn.locked.id}`);
-                // removeConnection will call cleanupOrphanLocks again, so we just call it and exit.
+                // removeConnection 会再次调用 cleanupOrphanLocks，所以我们直接调用它并退出。
                 removeConnection(conn);
-                return; // Exit and let the new cleanup run on the modified state.
+                return; // 退出，让新的清理函数在修改后的状态上运行。
             }
             current = current.controller;
             depth++;
             if (depth > 50) {
-                // Safety break
+                // 安全中断
                 break;
             }
         }
@@ -808,11 +814,11 @@ function applyLock(controller, locked) {
  * @returns {boolean} 是否可以控制
  */
 function canControl(controller, target) {
-    // if (controller.componentId !== target.componentId) return false; // DEPRECATED: Allow inter-component locking
+    // 螺丝必须在棋盘上才能锁定
     if (controller.control) return false;
-    if (!controller.cell || !target.cell) return false; // Screws must be on board to lock
+    if (!controller.cell || !target.cell) return false;
 
-    // NEW: Inter-component distance check
+    // 新增：跨组件距离检查
     const dist = Math.abs(controller.cell.dataset.row - target.cell.dataset.row) + Math.abs(controller.cell.dataset.col - target.cell.dataset.col);
     if (dist > gameConfig.MAX_INTER_COMPONENT_LOCK_DISTANCE) {
         return false;
@@ -888,7 +894,7 @@ function getStageModifiers() {
     if (progress < stages.STAGE_3_PROGRESS) {
         return { ...stages.MODIFIERS[3], hint: '' };
     }
-    // Stage 4: Monetization Hook
+    // 阶段4：可作为商业化切入点
     return {
         ...stages.MODIFIERS[4],
         // hint: '场上太复杂了！试试解锁新盒子或临时槽位来降低难度吧！',
@@ -907,7 +913,7 @@ function planColorDistribution(boxColorPlan, allColorsForLevel) {
         screwColorPlan.push(color, color, color);
     }
 
-    // Staged color introduction logic
+    // 颜色分阶段引入逻辑
     const colorTiers = {
         tier1: allColorsForLevel.slice(0, 4),
         tier2: allColorsForLevel.slice(4, 7),
@@ -918,7 +924,7 @@ function planColorDistribution(boxColorPlan, allColorsForLevel) {
         if (colorTiers.tier1.includes(color)) return 1;
         if (colorTiers.tier2.includes(color)) return 2;
         if (colorTiers.tier3.includes(color)) return 3;
-        return 4; // Should not happen
+        return 4; // 正常情况下不应发生
     };
 
     screwColorPlan.sort((a, b) => {
@@ -927,7 +933,7 @@ function planColorDistribution(boxColorPlan, allColorsForLevel) {
         if (tierA !== tierB) {
             return tierA - tierB;
         }
-        return Math.random() - 0.5; // Shuffle within the same tier
+        return Math.random() - 0.5; // 在同一层级内随机排序
     });
 
     return screwColorPlan;
@@ -939,7 +945,7 @@ function planBoxes(totalBoxes, availableColors) {
         const color = availableColors[i % availableColors.length];
         boxPlan.push(color);
     }
-    // Shuffle the box plan for randomness
+    // 为增加随机性，打乱盒子计划
     for (let i = boxPlan.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [boxPlan[i], boxPlan[j]] = [boxPlan[j], boxPlan[i]];
@@ -952,12 +958,13 @@ function planBoxes(totalBoxes, availableColors) {
  * @param {Array} newScrews 新螺丝数组（可选）
  */
 function setupLocks(newScrews) {
+    console.log('设置锁定关系', newScrews);
     const free = tempSlotsState.filter((d) => d === null).length;
     const { lockProbFactor, connectionMultiplier, extraConnections, hint } = getStageModifiers();
 
     if (hint && !hintMessageShown) {
         showMessage(hint);
-        hintMessageShown = true; // Ensure message is shown only once per game
+        hintMessageShown = true; // 确保消息每局只显示一次
     }
 
     const baseProb = Math.min(0.8, 0.2 + free * 0.1);
@@ -971,7 +978,7 @@ function setupLocks(newScrews) {
         screwsByComponent[screw.componentId].push(screw);
     }
 
-    // NEW: Get all screws on board to act as potential controllers
+    // 新增：获取棋盘上所有螺丝作为潜在的控制器
     const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
 
     // [REFACTORED] "卡点颜色"逻辑现在被整合进主循环，这里只获取需要优先锁定的颜色集合
@@ -987,21 +994,28 @@ function setupLocks(newScrews) {
         console.warn('检测到有未满的盒子，将对新生成的对应颜色螺丝优先锁定:', [...needyColors]);
     }
 
+    console.log('screwsByComponent:', screwsByComponent);
+
     for (const componentId in screwsByComponent) {
-        const componentScrews = screwsByComponent[componentId]; // These are the NEW screws
-        let currentGroups = new Set(lockConnections.map((c) => c.locked.id));
+        const componentScrews = screwsByComponent[componentId]; // 这些是新生成的螺丝
+        let currentGroupsCount = countLockGroups();
 
+        console.log('componentScrews:', componentScrews);
         for (const locked of componentScrews) {
-            if (locked.locked) continue; // Already locked, skip.
+            if (locked.locked) {
+                continue;
+            } // 已经是锁定状态，跳过
 
-            // A screw that is already acting as a controller for a multi-lock
+            // 一个已经作为并联锁控制器的螺丝
             if (locked.control && !locked.locked) {
                 continue;
             }
 
             // --- MASTER GATE: Has the board hit its lock group limit? ---
-            if (currentGroups.size >= getLockGroupLimit()) {
-                break; // Stop creating new lock groups for this component
+            console.log('currentGroupsCount:', currentGroupsCount);
+            if (currentGroupsCount >= getLockGroupLimit()) {
+                console.log('达到锁组上限，停止为此组件创建新的锁组', currentGroupsCount, getLockGroupLimit());
+                break; // 停止为此组件创建新的锁组
             }
 
             // --- GATE 1: SHOULD we lock this screw? ---
@@ -1009,50 +1023,73 @@ function setupLocks(newScrews) {
             const finalProb = Math.min(baseProb * lockProbFactor, 0.95);
             const shouldLockProbabilistically = Math.random() <= finalProb;
 
+            console.log('1. 是否锁定螺丝', 'mustLock:', mustLock, 'shouldLockProbabilistically:', shouldLockProbabilistically);
             if (!mustLock && !shouldLockProbabilistically) {
-                continue; // This screw remains free.
+                continue; // 这个螺丝保持自由状态
             }
 
             // --- Gate 2: Lock Type Selection (only runs if Gate 1 passes) ---
             const allPotentialControllers = allOnBoardScrews.filter((c) => c.id !== locked.id && canControl(c, locked));
-            if (allPotentialControllers.length === 0) continue;
+            console.log('2. 所有可能的控制器', allPotentialControllers);
+            if (allPotentialControllers.length === 0) {
+                continue;
+            }
 
-            const chainableControllers = allPotentialControllers.filter((c) => c.locked); // Controllers that are ALREADY locked
-            const multiLockControllers = allPotentialControllers.filter((c) => !c.locked); // Controllers that are FREE
+            const chainableControllers = allPotentialControllers.filter((c) => c.locked); // 已经是锁定状态的控制器
+            const multiLockControllers = allPotentialControllers.filter((c) => !c.locked); // 未被锁定的自由控制器
 
             const preferChainLock = Math.random() < gameConfig.CHAIN_LOCK_PROBABILITY;
+            const limit = getLockControllerLimit();
 
-            if (preferChainLock && chainableControllers.length > 0) {
-                // --- A) Create a CHAIN LOCK ---
-                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
-                applyLock(chainableControllers[0], locked);
-                currentGroups.add(locked.id);
+            console.log('preferChainLock:', preferChainLock);
+            console.log('chainableControllers:', chainableControllers);
+
+            // 新增：筛选出符合长度限制的链式控制器
+            const validChainControllers = chainableControllers.filter((c) => getLockDepth(c) < limit);
+
+            if (preferChainLock && validChainControllers.length > 0) {
+                console.log('2.1 创建链式锁');
+                console.log('preferChainLock:', preferChainLock);
+                console.log('chainableControllers:', validChainControllers);
+                // --- A) 创建链式锁 ---
+                validChainControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
+                applyLock(validChainControllers[0], locked);
+                currentGroupsCount = countLockGroups();
             } else if (multiLockControllers.length > 0) {
-                // --- B) Create a MULTI-LOCK (or fallback for chain lock) ---
+                console.log('2.2 创建并联锁');
+                console.log('multiLockControllers:', multiLockControllers);
+                // --- B) 创建并联锁（或作为链式锁的备用选项）---
                 multiLockControllers.sort((a, b) => {
                     const da = Math.abs(a.cell.dataset.row - locked.cell.dataset.row) + Math.abs(a.cell.dataset.col - locked.cell.dataset.col);
                     const db = Math.abs(b.cell.dataset.row - locked.cell.dataset.row) + Math.abs(b.cell.dataset.col - locked.cell.dataset.col);
                     return da - db;
                 });
 
-                const limit = getLockControllerLimit();
                 // [FIXED] 重新引入随机性，确保连接数在 1 到 上限 之间随机
                 let count = 1 + Math.floor(Math.random() * limit);
                 count = Math.round(count * connectionMultiplier);
                 count += extraConnections;
                 // 最终进行强力限制，确保结果永远不会超过当前进度允许的上限
                 count = Math.min(count, multiLockControllers.length, limit);
+                console.log('count:', count);
+                console.log('limit:', limit);
 
                 for (let i = 0; i < count; i++) {
                     applyLock(multiLockControllers[i], locked);
                 }
-                if (count > 0) currentGroups.add(locked.id);
-            } else if (chainableControllers.length > 0) {
-                // --- C) Fallback: If multi-lock was preferred but not possible, create a chain lock ---
-                chainableControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
-                applyLock(chainableControllers[0], locked);
-                currentGroups.add(locked.id);
+                if (count > 0) {
+                    currentGroupsCount = countLockGroups();
+                }
+            } else if (validChainControllers.length > 0) {
+                console.log('2.3 创建链式锁 (备用)');
+                console.log('chainableControllers:', validChainControllers);
+                // --- C) 备用选项：如果并联锁是首选但无法创建，则创建链式锁 ---
+                validChainControllers.sort((a, b) => getLockDepth(b) - getLockDepth(a));
+                applyLock(validChainControllers[0], locked);
+                currentGroupsCount = countLockGroups();
             }
+
+            console.log('3. currentGroups:', currentGroupsCount);
         }
 
         // Deadlock prevention logic
@@ -1060,10 +1097,10 @@ function setupLocks(newScrews) {
         const lockedScrewsInComponent = componentScrews.filter((s) => s.locked).length;
 
         if (totalScrewsInComponent > 0 && lockedScrewsInComponent === totalScrewsInComponent) {
-            // Deadlock detected! Unlock one screw.
-            const screwToUnlock = componentScrews.find((s) => s.locked); // Find any locked screw
+            // 检测到死锁！解锁一个螺丝。
+            const screwToUnlock = componentScrews.find((s) => s.locked); // 找到任意一个被锁的螺丝
             if (screwToUnlock) {
-                // Find all connections locking this screw and remove them.
+                // 找到所有锁定此螺丝的连接并移除它们。
                 const connectionsToUnlock = lockConnections.filter((conn) => conn.locked === screwToUnlock);
                 for (const conn of connectionsToUnlock) {
                     removeConnection(conn);
@@ -1076,7 +1113,9 @@ function setupLocks(newScrews) {
 
 function checkPlateCompletion(component) {
     const currentPlate = component.plates[component.currentPlateIndex];
-    if (!currentPlate) return;
+    if (!currentPlate) {
+        return;
+    }
 
     const remainingScrews = currentPlate.screws.filter((s) => s.dot);
 
@@ -1092,9 +1131,10 @@ function checkPlateCompletion(component) {
             }
             component.isComplete = true;
 
-            // Spawn the next available component from the queue
+            // 从队列中生成下一个可用的组件
             const nextUnspawned = components.find((c) => !c.isSpawned);
             if (nextUnspawned) {
+                console.log('从队列中生成下一个可用的组件', nextUnspawned);
                 spawnComponent(nextUnspawned);
             }
 
@@ -1146,7 +1186,7 @@ function spawnComponentPlate(component) {
     const availableCells = [];
     for (let r = area.row; r < area.row + area.height; r++) {
         for (let c = area.col; c < area.col + area.width; c++) {
-            // Check if the cell exists and is not occupied BY ANOTHER component's plate
+            // 检查单元格是否存在，并且没有被其他组件的板块占用
             if (cellMap[r] && cellMap[r][c] && !cellMap[r][c].dataset.plateId) {
                 availableCells.push(cellMap[r][c]);
             }
@@ -1200,7 +1240,9 @@ function generateSingleComponent(type, colorPlan) {
         attempts++;
     } while (isAreaOverlapping(area, occupiedAreas) && attempts < 100);
 
-    if (isAreaOverlapping(area, occupiedAreas)) return null;
+    if (isAreaOverlapping(area, occupiedAreas)) {
+        return null;
+    }
     newComponent.area = area;
 
     let remainingScrews = colorPlan.length;
@@ -1232,7 +1274,9 @@ function generateSingleComponent(type, colorPlan) {
             newComponent.plates.push({ id: plateId, screws });
         }
         remainingScrews -= numScrewsThisLayer;
-        if (layerIndex > 20) break; // Safety break to prevent infinite loops
+        if (layerIndex > 20) {
+            break;
+        } // 安全中断以防止无限循环
     }
     return newComponent;
 }
@@ -1253,18 +1297,28 @@ function checkClickDot() {
  * @param {Element} dot 被点击的螺丝点元素
  */
 function handleDotClick(dot) {
-    if (dot.dataset.blocked === 'true') return;
+    if (dot.dataset.blocked === 'true') {
+        return;
+    }
     const color = dot.dataset.color;
     for (const box of boxes) {
-        if (box.dataset.enabled !== 'true') continue;
-        if (box.dataset.color !== color) continue;
+        if (box.dataset.enabled !== 'true') {
+            continue;
+        }
+        if (box.dataset.color !== color) {
+            continue;
+        }
         const emptySlot = [...box.children].find((el) => el.className === 'slot' && !el.dataset.filled);
         if (emptySlot) {
             const fromCell = dot.parentElement;
             const screw = screwMap[dot.dataset.sid];
-            if (screw) screw.dot = null;
+            if (screw) {
+                screw.dot = null;
+            }
             lockConnections.slice().forEach((conn) => {
-                if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+                if (conn.controller === screw || conn.locked === screw) {
+                    removeConnection(conn);
+                }
             });
             const newDot = document.createElement('div');
             newDot.className = 'slot';
@@ -1277,7 +1331,9 @@ function handleDotClick(dot) {
 
             if (screw) {
                 const component = components.find((c) => c.id === screw.componentId);
-                if (component) checkPlateCompletion(component);
+                if (component) {
+                    checkPlateCompletion(component);
+                }
             }
             lastRemovedCell = fromCell;
             updateInfo();
@@ -1295,9 +1351,13 @@ function handleDotClick(dot) {
     if (emptyIndex !== -1) {
         const fromCell = dot.parentElement;
         const screw = screwMap[dot.dataset.sid];
-        if (screw) screw.dot = null;
+        if (screw) {
+            screw.dot = null;
+        }
         lockConnections.slice().forEach((conn) => {
-            if (conn.controller === screw || conn.locked === screw) removeConnection(conn);
+            if (conn.controller === screw || conn.locked === screw) {
+                removeConnection(conn);
+            }
         });
         tempSlotsState[emptyIndex] = dot;
         renderTempSlots();
@@ -1305,7 +1365,9 @@ function handleDotClick(dot) {
 
         if (screw) {
             const component = components.find((c) => c.id === screw.componentId);
-            if (component) checkPlateCompletion(component);
+            if (component) {
+                checkPlateCompletion(component);
+            }
         }
 
         lastRemovedCell = fromCell;
@@ -1354,12 +1416,14 @@ function initBoxes() {
             box.addEventListener(
                 'click',
                 () => {
-                    setupBox(box, true); // Pass true for isHint/isManualAdd
+                    setupBox(box, true); // 传入 true 表示是提示或手动添加
                     const hintElement = box.querySelector('.hint');
-                    if (hintElement) hintElement.remove();
+                    if (hintElement) {
+                        hintElement.remove();
+                    }
                 },
-                { once: true }
-            ); // Ensure this only fires once
+                { once: true } // 确保只触发一次
+            );
         }
     });
 }
@@ -1369,7 +1433,9 @@ function initBoxes() {
  * 当临时槽位满时游戏失败
  */
 function checkTempSlotLimit() {
-    if (isClickDot) return;
+    if (isClickDot) {
+        return;
+    }
     setTimeout(() => {
         const tempDots = tempSlotsState.filter((d) => d).length;
         if (tempDots >= MAX_TEMP_SLOTS) {
@@ -1389,7 +1455,7 @@ function showMessage(msg) {
     message.textContent = msg;
 }
 
-// New helper function to get detailed stats for all colors
+// 新的辅助函数，用于获取所有颜色的详细统计信息
 function getColorStats() {
     const stats = {};
     COLORS.forEach((c) => {
@@ -1435,23 +1501,31 @@ function getColorStats() {
 
 function evaluateDifficultyForColor(color, allColorStats) {
     const stats = allColorStats[color];
-    if (!stats) return 3; // Hard if no stats
+    if (!stats) {
+        return 3;
+    } // 如果没有统计数据，则难度为高
 
     const accessibleTotal = stats.onBoardUnlocked + stats.inTemp + stats.inBox;
     const availableTotal = accessibleTotal + stats.onBoardLocked;
 
-    if (accessibleTotal >= 3) return 1; // Easy
-    if (availableTotal >= 3) return 2; // Medium
-    return 3; // Hard
+    if (accessibleTotal >= 3) {
+        return 1;
+    } // 简单
+    if (availableTotal >= 3) {
+        return 2;
+    } // 中等
+    return 3; // 困难
 }
 
 function evaluateOverallDifficulty() {
     let minLevel = 3;
-    const allColorStats = getColorStats(); // Calculate once
+    const allColorStats = getColorStats(); // 只计算一次
     boxes.forEach((box) => {
         if (box.dataset.enabled === 'true') {
             const lvl = evaluateDifficultyForColor(box.dataset.color, allColorStats);
-            if (lvl < minLevel) minLevel = lvl;
+            if (lvl < minLevel) {
+                minLevel = lvl;
+            }
         }
     });
     return minLevel;
@@ -1462,7 +1536,9 @@ function evaluateOverallDifficulty() {
  * 在画布上绘制难度变化趋势
  */
 function drawDifficultyChart() {
-    if (!difficultyCtx) return;
+    if (!difficultyCtx) {
+        return;
+    }
     const w = difficultyCanvas.width;
     const h = difficultyCanvas.height;
     difficultyCtx.clearRect(0, 0, w, h);
@@ -1483,15 +1559,20 @@ function drawDifficultyChart() {
     difficultyCtx.fillText('中', left - 5, top + (bottom - top) / 2 + 5);
     difficultyCtx.fillText('低', left - 5, bottom + 5);
 
-    if (difficultyHistory.length === 0) return;
+    if (difficultyHistory.length === 0) {
+        return;
+    }
     const step = (w - left - 10) / Math.max(1, difficultyHistory.length - 1);
     difficultyCtx.strokeStyle = '#f00';
     difficultyCtx.beginPath();
     difficultyHistory.forEach((lvl, idx) => {
         const x = left + idx * step;
         const y = bottom - (lvl - 1) * ((bottom - top) / 2);
-        if (idx === 0) difficultyCtx.moveTo(x, y);
-        else difficultyCtx.lineTo(x, y);
+        if (idx === 0) {
+            difficultyCtx.moveTo(x, y);
+        } else {
+            difficultyCtx.lineTo(x, y);
+        }
     });
     difficultyCtx.stroke();
     difficultyCtx.fillStyle = '#f00';
@@ -1511,7 +1592,9 @@ function drawDifficultyChart() {
 function recordDifficulty(level) {
     difficultyHistory.push(level);
     drawDifficultyChart();
-    if (currentDifficultyEl) currentDifficultyEl.textContent = DIFFICULTY_NAMES[level - 1];
+    if (currentDifficultyEl) {
+        currentDifficultyEl.textContent = DIFFICULTY_NAMES[level - 1];
+    }
 }
 
 /**
@@ -1581,9 +1664,15 @@ function updateInfo() {
  */
 function getLockGroupLimit() {
     const progress = getProgress();
-    if (progress < 0.1) return 1; // 新手期，最多1个锁组
-    if (progress < 0.3) return Math.min(MAX_LOCK_GROUPS, 2); // 普通期，最多2个
-    if (progress < 0.7) return Math.min(MAX_LOCK_GROUPS, 4);
+    if (progress < 0.1) {
+        return 1;
+    } // 新手期，最多1个锁组
+    if (progress < 0.3) {
+        return Math.min(MAX_LOCK_GROUPS, 2);
+    } // 普通期，最多2个
+    if (progress < 0.7) {
+        return Math.min(MAX_LOCK_GROUPS, 4);
+    }
     return MAX_LOCK_GROUPS;
 }
 
@@ -1593,9 +1682,13 @@ function getLockGroupLimit() {
  */
 function getLockControllerLimit() {
     const progress = getProgress();
-    // [FIXED] 简化并修复限制逻辑
-    if (progress < 0.3) return Math.min(gameConfig.MAX_CONTROLLERS, 2);
-    if (progress < 0.7) return Math.min(gameConfig.MAX_CONTROLLERS, 3);
+    // 使用新的阶段化配置
+    for (const stage of gameConfig.MULTI_LOCK_STAGES) {
+        if (progress < stage.progressThreshold) {
+            return Math.min(stage.controllerLimit, gameConfig.MAX_CONTROLLERS);
+        }
+    }
+    // 如果超过所有阈值，则使用最终的最大值
     return gameConfig.MAX_CONTROLLERS;
 }
 
@@ -1634,121 +1727,55 @@ function getChain(screw) {
     return chain;
 }
 
-function tryClickDot(dot, reason) {
-    const screw = screwMap[dot.dataset.sid];
-    const chain = getChain(screw);
-    const free = tempSlotsState.filter((d) => d === null).length;
-    if (free < chain.length) {
-        return false;
-    }
-    for (const s of chain) {
-        if (!s.dot || s.dot.dataset.blocked === 'true') return false;
-    }
-    if (chain.length > 0) {
-    }
-    for (const s of chain) {
-        handleDotClick(s.dot);
-    }
-    handleDotClick(dot);
-    return true;
-}
-
-function autoPlayStep() {
-    if (message.textContent.includes('胜利') || message.textContent.includes('失败')) {
-        stopAutoPlay();
-        return;
-    }
-
-    for (const box of boxes) {
-        if (box.dataset.enabled !== 'true') continue;
-        const color = box.dataset.color;
-        const dots = [...document.querySelectorAll('#game-board .dot')].filter((d) => d.dataset.color === color);
-        for (const dot of dots) {
-            if (dot.dataset.blocked !== 'true') {
-                console.log('当前有匹配盒子颜色，自动点击:', dot.dataset.sid, 'color:', color, dot.dataset.color);
-                if (tryClickDot(dot, 'box ' + color)) return;
-            }
-        }
-    }
-
-    let bestPlate = null;
-    let bestDots = null;
-    let bestCount = Infinity;
-    const freeSlots = tempSlotsState.filter((d) => d === null).length;
-    for (const plate of activePlates) {
-        const dots = plate.screws.map((s) => s.dot).filter(Boolean);
-        if (dots.length === 0) continue;
-        if (dots.length < freeSlots && dots.length < bestCount) {
-            bestPlate = plate;
-            bestDots = dots;
-            bestCount = dots.length;
-        }
-    }
-    const emptySlots = tempSlotsState.filter((d) => d === null).length;
-
-    if (bestPlate && emptySlots > 1) {
-        for (const dot of bestDots) {
-            if (dot.dataset.blocked !== 'true') {
-                console.log('没有匹配颜色螺丝，尝试解锁板块螺丝:', dot);
-                if (tryClickDot(dot, 'min plate ' + bestCount)) return;
-            }
-        }
-    }
-
-    console.log('自动点击失败');
-}
-
-function startAutoPlay() {
-    if (autoPlayTimer) return;
-    autoPlayTimer = setInterval(autoPlayStep, AUTO_PLAY_INTERVAL);
-    autoBtn.textContent = '停止自动';
-}
-
-function stopAutoPlay() {
-    if (autoPlayTimer) {
-        clearInterval(autoPlayTimer);
-        autoPlayTimer = null;
-    }
-    autoBtn.textContent = '自动玩';
-}
-
 /**
  * 开始游戏
  * 初始化游戏状态并开始新一局游戏
  */
 function startGame() {
-    stopAutoPlay();
-    // The 50-level slider is the primary source of truth for difficulty settings
+    // 始终从 UI 输入框读取配置，使其成为唯一的数据源
+    TOTAL_BOXES = parseInt(document.getElementById('box-count').value, 10);
+    const colorCnt = parseInt(document.getElementById('color-count-input').value, 10);
+    MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value, 10);
+    COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
+    gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
+
+    // 从滑块或手动输入更新锁相关的配置
     const settings = DIFFICULTY_LEVELS.find((d) => d.level === selectedDifficulty);
-
     if (settings) {
-        // --- 应用关卡配置 ---
-        TOTAL_BOXES = settings.boxes;
-        COLORS = ALL_COLORS.slice(0, Math.min(settings.colors, ALL_COLORS.length));
-        MAX_TEMP_SLOTS = settings.tempSlots;
-
-        // --- 应用锁算法配置 ---
+        // 对于复杂的、不易手动设置的参数，我们仍然可以依赖难度预设
         MAX_LOCK_GROUPS = settings.maxLockGroups;
-        gameConfig.CHAIN_LOCK_PROBABILITY = settings.chainLockProbability;
-
-        // --- 同步UI输入框 (可选, 但保持一致性是好习惯) ---
-        document.getElementById('box-count').value = settings.boxes;
-        document.getElementById('color-count-input').value = settings.colors;
-        document.getElementById('temp-count').value = settings.tempSlots;
-        document.getElementById('chain-lock-prob-input').value = settings.chainLockProbability;
-        document.getElementById('max-controllers').value = gameConfig.MAX_CONTROLLERS;
-    } else {
-        // Fallback to manual UI config if something goes wrong
-        TOTAL_BOXES = parseInt(document.getElementById('box-count').value) || 50;
-        const colorCnt = parseInt(document.getElementById('color-count-input').value) || 7;
-        MAX_TEMP_SLOTS = parseInt(document.getElementById('temp-count').value) || 5;
-        COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
-        gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
     }
 
-    hintMessageShown = false; // Reset hint message flag for new game
+    // 从 UI 输入框读取剩余的配置
+    if (document.getElementById('chain-lock-prob-input')) {
+        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
+    }
+    if (document.getElementById('max-controllers')) {
+        gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
+    }
+    if (document.getElementById('box-ai-threshold-input')) {
+        gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
+    }
 
-    // Setup global color tiers based on the current level's colors
+    // 新增：读取并联锁阶段配置
+    if (document.getElementById('multi-lock-threshold-1')) {
+        gameConfig.MULTI_LOCK_STAGES = [
+            {
+                progressThreshold: parseFloat(document.getElementById('multi-lock-threshold-1').value),
+                controllerLimit: parseInt(document.getElementById('multi-lock-limit-1').value, 10),
+            },
+            {
+                progressThreshold: parseFloat(document.getElementById('multi-lock-threshold-2').value),
+                controllerLimit: parseInt(document.getElementById('multi-lock-limit-2').value, 10),
+            },
+        ];
+        // 确保阶段按阈值升序排列
+        gameConfig.MULTI_LOCK_STAGES.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    }
+
+    hintMessageShown = false; // 为新游戏重置提示消息标志
+
+    // 根据当前关卡的颜色设置全局颜色层级
     colorTiers.tier1 = COLORS.slice(0, 4);
     colorTiers.tier2 = COLORS.slice(4, 7);
     colorTiers.tier3 = COLORS.slice(7);
@@ -1770,7 +1797,9 @@ function startGame() {
     eliminatedScrewIds.clear();
     tempSlotsState = [];
     nextScrewId = 0;
-    for (const k in screwMap) delete screwMap[k];
+    for (const k in screwMap) {
+        delete screwMap[k];
+    }
     components = [];
     nextComponentId = 0;
 
@@ -1789,7 +1818,9 @@ function startGame() {
     let spawnedCount = 0;
     for (const comp of components) {
         if (comp.type === 'LARGE' && spawnedCount < initialSpawn.LARGE) {
-            if (spawnComponent(comp)) spawnedCount++;
+            if (spawnComponent(comp)) {
+                spawnedCount++;
+            }
         }
     }
 
@@ -1797,7 +1828,9 @@ function startGame() {
     spawnedCount = 0;
     for (const comp of components) {
         if (comp.type === 'MEDIUM' && spawnedCount < Math.min(initialSpawn.MEDIUM, availableMedium)) {
-            if (spawnComponent(comp)) spawnedCount++;
+            if (spawnComponent(comp)) {
+                spawnedCount++;
+            }
         }
     }
 
@@ -1805,14 +1838,16 @@ function startGame() {
     spawnedCount = 0;
     for (const comp of components) {
         if (comp.type === 'SMALL' && spawnedCount < initialSpawn.SMALL) {
-            if (spawnComponent(comp)) spawnedCount++;
+            if (spawnComponent(comp)) {
+                spawnedCount++;
+            }
         }
     }
 
-    // NEW: Intelligent initial box setup
+    // 新增：智能化的初始盒子设置
     resetBoxes();
 
-    // 1. Get total counts of all screws for each color (spawned or not)
+    // 1. 获取每种颜色所有螺丝的总数（无论是否已生成）
     const totalColorCounts = Object.fromEntries(COLORS.map((c) => [c, 0]));
     for (const id in screwMap) {
         if (!eliminatedScrewIds.has(id)) {
@@ -1820,10 +1855,10 @@ function startGame() {
         }
     }
 
-    // 2. Filter for colors that have at least 3 screws in total (ensuring they are solvable)
+    // 2. 筛选出总数至少为3的颜色（确保它们是可解的）
     const solvableColors = Object.keys(totalColorCounts).filter((c) => totalColorCounts[c] >= 3);
 
-    // 3. Of the solvable colors, find their current counts on the board to prioritize
+    // 3. 在可解的颜色中，根据它们在棋盘上的当前数量进行优先级排序
     const initialBoardColors = countBoardColors();
     const sortedSolvableColors = solvableColors.sort((a, b) => {
         const countA = initialBoardColors[a] || 0;
@@ -1831,7 +1866,7 @@ function startGame() {
         return countB - countA;
     });
 
-    // 4. Override the start of the queue with these prioritized, solvable colors
+    // 4. 用这些经过优先级排序的可解颜色覆盖队列的开头
     for (let i = 0; i < sortedSolvableColors.length; i++) {
         const color = sortedSolvableColors[i];
         const indexInQueue = boxColorQueue.indexOf(color);
@@ -1843,13 +1878,14 @@ function startGame() {
 
     difficultyHistory = [];
     drawDifficultyChart();
-    if (currentDifficultyEl) currentDifficultyEl.textContent = '-';
+    if (currentDifficultyEl) {
+        currentDifficultyEl.textContent = '-';
+    }
     initBoxes();
     updateInfo();
     showMessage('');
 }
 
-const autoBtn = document.getElementById('auto-btn');
 const difficultyButtonsContainer = document.getElementById('difficulty-buttons');
 
 function updateInputsWithDifficulty(difficulty) {
@@ -1895,42 +1931,9 @@ function createDifficultyButtons() {
     }
 }
 
-document.getElementById('start-btn').addEventListener('click', () => {
-    stopAutoPlay();
-    // Update config from UI before starting
-    gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
-    if (document.getElementById('chain-lock-prob-input')) {
-        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
-    }
-    if (document.getElementById('max-controllers')) {
-        gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
-    }
-    if (document.getElementById('box-ai-threshold-input')) {
-        gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
-    }
-    startGame();
-});
 document.getElementById('reset-btn').addEventListener('click', () => {
     stopAutoPlay();
-    // Update config from UI before starting
-    gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
-    if (document.getElementById('chain-lock-prob-input')) {
-        gameConfig.CHAIN_LOCK_PROBABILITY = parseFloat(document.getElementById('chain-lock-prob-input').value);
-    }
-    if (document.getElementById('max-controllers')) {
-        gameConfig.MAX_CONTROLLERS = parseInt(document.getElementById('max-controllers').value, 10);
-    }
-    if (document.getElementById('box-ai-threshold-input')) {
-        gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
-    }
     startGame();
-});
-autoBtn.addEventListener('click', () => {
-    if (autoPlayTimer) {
-        stopAutoPlay();
-    } else {
-        startAutoPlay();
-    }
 });
 addTempSlotBtn.addEventListener('click', () => {
     MAX_TEMP_SLOTS++;
@@ -1953,7 +1956,9 @@ function weightedRandom(colors, weights) {
     for (const c of colors) {
         if (weights[c]) {
             r -= weights[c];
-            if (r <= 0) return c;
+            if (r <= 0) {
+                return c;
+            }
         }
     }
     const validColors = colors.filter((c) => weights[c] > 0);
@@ -1970,7 +1975,7 @@ function weightedRandom(colors, weights) {
 function setupBox(box, isManualAdd = false) {
     const allColorStats = getColorStats();
 
-    // 1. Permanent Purge: Remove boxes for colors that are completely extinct from the game.
+    // 1. 永久净化：从盒子队列中移除在游戏中已完全耗尽的颜色。
     const originalQueueCount = boxColorQueue.length;
     boxColorQueue = boxColorQueue.filter((color) => {
         const stats = allColorStats[color];
@@ -1989,23 +1994,23 @@ function setupBox(box, isManualAdd = false) {
         return;
     }
 
-    // 2. Dynamic Candidate Pool: A color is only a candidate if its screws are ON THE BOARD now.
+    // 2. 动态候选池：只有当某种颜色的螺丝当前在棋盘上时，它才有资格成为候选颜色。
     const onBoardScrewStats = countBoardColors();
     const onBoardColors = new Set(Object.keys(onBoardScrewStats).filter((c) => onBoardScrewStats[c] > 0));
 
     let turnCandidates = boxColorQueue.filter((c) => onBoardColors.has(c));
 
-    // Fallback: If no on-board screw colors are in the queue, the game could get stuck.
-    // In this case, use the entire (purged) queue as candidates to prevent a deadlock.
+    // 备用策略：如果队列中没有任何颜色与棋盘上的螺丝颜色匹配，游戏可能会卡住。
+    // 在这种情况下，使用整个（已净化）的队列作为候选，以防止死锁。
     if (turnCandidates.length === 0) {
-        turnCandidates = [...boxColorQueue]; // Use a copy
+        turnCandidates = [...boxColorQueue]; // 使用副本
         if (boxColorQueue.length > 0) {
             console.warn('场上无螺丝颜色匹配盒子队列，使用完整队列作为候选以避免卡关。');
         }
     }
 
     if (turnCandidates.length === 0) {
-        // This can happen if the queue is now empty after filtering.
+        // 如果队列在筛选后变空，可能会发生这种情况。
         box.dataset.enabled = 'false';
         box.classList.remove('enabled');
         box.style.borderColor = '#ccc';
@@ -2046,7 +2051,7 @@ function setupBox(box, isManualAdd = false) {
     } else if (progress < gameConfig.BOX_AI_CHALLENGE_THRESHOLD) {
         console.log('==================');
         console.log('新手模式(获取颜色数量>=3的螺丝):', progress, gameConfig.BOX_AI_CHALLENGE_THRESHOLD);
-        // Early Game: Helpful colors
+        // 游戏前期：提供有帮助的颜色
         strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
             return stats && stats.onBoardUnlocked + stats.onBoardLocked + stats.inTemp + stats.inBox >= 3;
@@ -2054,10 +2059,10 @@ function setupBox(box, isManualAdd = false) {
     } else {
         console.log('==================');
         console.log('挑战模式(获取颜色数量>=3且被锁住的螺丝):', progress, gameConfig.BOX_AI_CHALLENGE_THRESHOLD);
-        // Late Game: Challenging colors ("严师") - REFINED LOGIC
+        // 游戏后期："严师"模式 - 优化后的逻辑
         // 优先选择那些"可解但被锁住"的颜色
-        // 条件1: 场上该颜色总数 >= 3 (保证可解性)
-        // 条件2: 场上该颜色至少有1个被锁住 (保证挑战性)
+        // 条件1：场上该颜色总数 >= 3（保证可解性）
+        // 条件2：场上该颜色至少有1个被锁住（保证挑战性）
         strategicColors = turnCandidates.filter((c) => {
             const stats = allColorStats[c];
             return (
@@ -2070,30 +2075,36 @@ function setupBox(box, isManualAdd = false) {
     }
     console.log('strategicColors:', strategicColors);
 
-    // Priority 1: A strategic color that is not a duplicate on the board.
+    // 优先级1：一个在场上不重复的策略性颜色。
     const p1 = strategicColors.find((c) => !usedBoxColors.has(c));
-    if (p1) bestColor = p1;
+    if (p1) {
+        bestColor = p1;
+    }
 
-    // Priority 2: Any color that is not a duplicate.
+    // 优先级2：任何一个不重复的颜色。
     if (!bestColor) {
         const p2 = turnCandidates.find((c) => !usedBoxColors.has(c));
-        if (p2) bestColor = p2;
+        if (p2) {
+            bestColor = p2;
+        }
     }
 
-    // Priority 3: A strategic color that IS a duplicate (forced choice).
+    // 优先级3：一个重复的策略性颜色（强制选择）。
     if (!bestColor) {
-        if (strategicColors.length > 0) bestColor = strategicColors[0];
+        if (strategicColors.length > 0) {
+            bestColor = strategicColors[0];
+        }
     }
 
-    // Priority 4: Ultimate fallback, just take the first available candidate.
+    // 优先级4：最终的备用选项，直接选择第一个可用的候选颜色。
     if (!bestColor) {
         bestColor = turnCandidates[0];
     }
 
-    // 4. Final Processing
+    // 4. 最终处理
     const indexInMainQueue = boxColorQueue.indexOf(bestColor);
     if (indexInMainQueue === -1) {
-        // This is a logic error, but handle it gracefully. The box will appear empty.
+        // 这是一个逻辑错误，但需要优雅地处理。盒子将显示为空。
         console.error('逻辑错误：选择的颜色不在主队列中。', {
             bestColor: bestColor,
             turnCandidates: turnCandidates,
@@ -2151,13 +2162,13 @@ function absorbTempDots(color, box) {
             emptySlot.replaceWith(newDot);
             item.dot.remove();
         } else {
-            break; // Box is full
+            break; // 盒子已满
         }
     }
     renderTempSlots();
 
     if (checkAndProcessBoxMatch(box)) {
-        // Match was processed
+        // 匹配已处理
     } else {
         updateInfo();
         checkVictory();
@@ -2166,7 +2177,9 @@ function absorbTempDots(color, box) {
 }
 
 function checkAndProcessBoxMatch(box) {
-    if (!box || !box.dataset.color) return false;
+    if (!box || !box.dataset.color) {
+        return false;
+    }
 
     const color = box.dataset.color;
     const filledSlots = [...box.children].filter((s) => s.dataset.filled === 'true');
@@ -2206,13 +2219,19 @@ function totalRemainingPool() {
  */
 function countBoardColors() {
     const counts = Object.fromEntries(COLORS.map((c) => [c, 0]));
-    if (!components) return counts;
+    if (!components) {
+        return counts;
+    }
 
     for (const component of components) {
-        if (component.isComplete) continue;
+        if (component.isComplete) {
+            continue;
+        }
 
         const currentPlate = component.plates[component.currentPlateIndex];
-        if (!currentPlate) continue;
+        if (!currentPlate) {
+            continue;
+        }
 
         for (const screw of currentPlate.screws) {
             if (screw.dot && counts[screw.color] !== undefined) {
@@ -2224,7 +2243,9 @@ function countBoardColors() {
 }
 
 function spawnComponent(component) {
-    if (!component || component.isSpawned) return false;
+    if (!component || component.isSpawned) {
+        return false;
+    }
 
     const config = gameConfig.COMPONENT_CONFIG[component.type];
     const neededWidth = config.size.width;
@@ -2239,13 +2260,15 @@ function spawnComponent(component) {
         if (c.isSpawned && c.area) {
             for (let r = c.area.row; r < c.area.row + c.area.height; r++) {
                 for (let col = c.area.col; col < c.area.col + c.area.width; col++) {
-                    if (r < ROWS && col < COLS) occupiedGrid[r][col] = true;
+                    if (r < ROWS && col < COLS) {
+                        occupiedGrid[r][col] = true;
+                    }
                 }
             }
         }
     }
 
-    // --- Plan A: Try to find a perfect rectangular spot ---
+    // --- A计划：尝试找到一个完美的矩形区域 ---
     const startRow = Math.floor(Math.random() * (ROWS - neededHeight + 1));
     const startCol = Math.floor(Math.random() * (COLS - neededWidth + 1));
 
@@ -2261,7 +2284,9 @@ function spawnComponent(component) {
                         break;
                     }
                 }
-                if (!canPlace) break;
+                if (!canPlace) {
+                    break;
+                }
             }
             if (canPlace) {
                 area = { row: r, col: c, width: neededWidth, height: neededHeight };
@@ -2269,14 +2294,16 @@ function spawnComponent(component) {
                 break;
             }
         }
-        if (foundSpot) break;
+        if (foundSpot) {
+            break;
+        }
     }
 
-    // --- Plan B: Emergency fallback if no perfect spot is found ---
+    // --- B计划：如果找不到完美区域，则执行紧急备用方案 ---
     if (!foundSpot) {
         console.warn(`无法为组件 ${component.id} (${component.type}) 找到标准矩形位置。启动紧急随机放置模式。`);
 
-        // Collect all empty cells from the entire board.
+        // 收集棋盘上所有空的单元格。
         const allEmptyCells = [];
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
@@ -2288,17 +2315,17 @@ function spawnComponent(component) {
 
         const neededScrews = component.plates[0]?.screws.length || 0;
         if (allEmptyCells.length >= neededScrews) {
-            // Pick a random empty cell as an anchor for our new component area.
+            // 随机选择一个空单元格作为新组件区域的锚点。
             const anchorCell = allEmptyCells[Math.floor(Math.random() * allEmptyCells.length)];
             const anchorR = parseInt(anchorCell.dataset.row);
             const anchorC = parseInt(anchorCell.dataset.col);
 
-            // Define a standard-sized area centered around the anchor as much as possible.
-            // Try to make the anchor cell not be at the very edge of the new area.
+            // 以锚点为中心，尽可能定义一个标准尺寸的区域。
+            // 尽量避免让锚点单元格位于新区域的边缘。
             let r = anchorR - Math.floor(Math.random() * neededHeight);
             let c = anchorC - Math.floor(Math.random() * neededWidth);
 
-            // Clamp the area to be within the board boundaries.
+            // 将区域限制在棋盘边界内。
             r = Math.max(0, Math.min(r, ROWS - neededHeight));
             c = Math.max(0, Math.min(c, COLS - neededWidth));
 
@@ -2312,6 +2339,7 @@ function spawnComponent(component) {
 
     component.area = area;
     component.isSpawned = true;
+    console.log('spawnComponentPlate', component);
     spawnComponentPlate(component);
     return true;
 }
@@ -2325,14 +2353,14 @@ function checkAndReplenishScrews() {
         const nextUnspawned = components.find((c) => !c.isSpawned);
         if (nextUnspawned) {
             if (spawnComponent(nextUnspawned)) {
-                // Recalculate current number of screws after spawning
+                // 生成后重新计算当前的螺丝数量
                 currentOnBoard = Object.values(countBoardColors()).reduce((a, b) => a + b, 0);
             } else {
-                // Could not spawn, probably board is full, break the loop
+                // 无法生成，可能是棋盘已满，中断循环
                 break;
             }
         } else {
-            // No more unspawned small components left to replenish
+            // 没有更多未生成的小组件可以补充
             break;
         }
         safetyBreak++;
@@ -2340,7 +2368,7 @@ function checkAndReplenishScrews() {
 }
 
 // ===============================================
-// RESTORED AND IMPROVED Spawning Logic
+// 已恢复并改进的生成逻辑
 // ===============================================
 
 function getBoundingBox(cells) {
@@ -2368,13 +2396,15 @@ function getBoundingBox(cells) {
 }
 
 // ===============================================
-// NEW Difficulty Info Panel
+// 新增：难度信息面板
 // ===============================================
 function setupDifficultyInfoPanel() {
     const container = document.getElementById('difficulty-buttons');
-    if (!container) return;
+    if (!container) {
+        return;
+    }
 
-    // Inject CSS for the panel
+    // 为面板注入CSS样式
     const style = document.createElement('style');
     style.textContent = `
         #difficulty-info-panel {
@@ -2408,7 +2438,9 @@ function setupDifficultyInfoPanel() {
 
 function updateDifficultyInfoDisplay(level) {
     const panel = document.getElementById('difficulty-info-panel');
-    if (!panel) return;
+    if (!panel) {
+        return;
+    }
 
     const settings = DIFFICULTY_LEVELS.find((d) => d.level === level);
     if (!settings) {
@@ -2429,7 +2461,46 @@ function updateDifficultyInfoDisplay(level) {
     panel.innerHTML = infoHTML;
 }
 
-// Initial setup
+// 初始化
 createDifficultyButtons();
 setupDifficultyInfoPanel();
 updateDifficultyInfoDisplay(selectedDifficulty);
+
+if (document.getElementById('box-ai-threshold-input')) {
+    document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
+}
+
+startGame();
+
+/**
+ * 计算当前场上的锁定组数量
+ * 一个"锁定组"是一个或多个通过锁定关系连接在一起的螺丝集合。
+ * 例如：A->B, C->B 是一个组。 A->B, B->C 也是一个组。 A->B, D->E 是两个独立的组。
+ * @returns {number} 锁定组的数量
+ */
+function countLockGroups() {
+    if (lockConnections.length === 0) {
+        return 0;
+    }
+
+    // 我们将每个组的"根"定义为一个不由任何其他被锁定螺丝控制的螺丝。
+
+    // 1. 获取所有独特的被锁定螺丝ID
+    const allLockedScrewIds = new Set();
+    for (const conn of lockConnections) {
+        allLockedScrewIds.add(conn.locked.id);
+    }
+
+    const groupRoots = new Set();
+
+    // 2. 遍历每个连接，找到组的根
+    for (const conn of lockConnections) {
+        // 如果一个连接的控制器本身不是一个被锁定的螺丝，
+        // 那么这个连接的目标（被锁定的螺丝）就是一个组的根。
+        if (!allLockedScrewIds.has(conn.controller.id)) {
+            groupRoots.add(conn.locked.id);
+        }
+    }
+
+    return groupRoots.size;
+}
