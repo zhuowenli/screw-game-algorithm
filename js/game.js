@@ -15,7 +15,14 @@ const gameConfig = {
     MAX_INTER_COMPONENT_LOCK_DISTANCE: 12, // 跨板块锁定的最大距离(曼哈顿距离)
     MAX_CONTROLLERS: 4, // 最大并联锁数量
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
-    TEMP_SLOT_WEIGHT_FACTOR: 1, // 临时槽中颜色影响盒子生成的权重因子
+
+    // 临时槽权重动态配置
+    TEMP_SLOT_WEIGHT_STAGES: [
+        { progressThreshold: 0.2, weightFactor: 1.5 },
+        { progressThreshold: 0.5, weightFactor: 1.0 },
+        { progressThreshold: 0.8, weightFactor: 0.5 },
+        { progressThreshold: 1.0, weightFactor: 0.2 },
+    ],
 
     // 并联锁(单个螺丝被多个螺丝锁住)的数量限制
     MULTI_LOCK_STAGES: [
@@ -1727,9 +1734,6 @@ function startGame() {
     if (document.getElementById('box-ai-threshold-input')) {
         gameConfig.BOX_AI_CHALLENGE_THRESHOLD = parseFloat(document.getElementById('box-ai-threshold-input').value);
     }
-    if (document.getElementById('temp-slot-weight')) {
-        gameConfig.TEMP_SLOT_WEIGHT_FACTOR = parseFloat(document.getElementById('temp-slot-weight').value);
-    }
 
     // --- 读取锁链长度配置 ---
     const newMultiLockStages = [];
@@ -1762,7 +1766,7 @@ function startGame() {
     stageRows.forEach((row) => {
         const probFactorInput = row.querySelector('.ds-prob-factor');
         const connMultInput = row.querySelector('.ds-conn-mult');
-        const progressInput = row.querySelector('.ds-progress');
+        const progressInput = row.querySelector('.progress-threshold');
 
         const isLastStage = !progressInput;
 
@@ -1786,6 +1790,30 @@ function startGame() {
         gameConfig.DIFFICULTY_STAGES = newStages;
         // 配置更新后，重新渲染UI以显示修正后的值
         renderDifficultyStagesUI();
+    }
+
+    // --- 读取临时槽权重配置 ---
+    const newTempSlotWeightStages = [];
+    const tempSlotWeightRows = document.querySelectorAll('#dynamic-temp-slot-weight-stages-container .stage-config');
+
+    tempSlotWeightRows.forEach((row) => {
+        const progressInput = row.querySelector('.progress-threshold');
+        const weightFactorInput = row.querySelector('.weight-factor');
+        const isLastStage = !progressInput;
+
+        const stageData = {
+            progressThreshold: isLastStage ? 1.0 : parseFloat(progressInput.value),
+            weightFactor: parseFloat(weightFactorInput.value),
+        };
+        newTempSlotWeightStages.push(stageData);
+    });
+
+    if (newTempSlotWeightStages.length > 0) {
+        // 后台修正和排序
+        newTempSlotWeightStages.sort((a, b) => a.progressThreshold - b.progressThreshold);
+        newTempSlotWeightStages[newTempSlotWeightStages.length - 1].progressThreshold = 1.0;
+        gameConfig.TEMP_SLOT_WEIGHT_STAGES = newTempSlotWeightStages;
+        renderTempSlotWeightStagesUI(); // 更新UI以显示修正后的值
     }
 
     hintMessageShown = false; // 为新游戏重置提示消息标志
@@ -1958,9 +1986,6 @@ updateInputsWithDifficulty(selectedDifficulty);
 if (document.getElementById('box-ai-threshold-input')) {
     document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
 }
-if (document.getElementById('temp-slot-weight')) {
-    document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
-}
 
 // ===============================================
 // 新增: 动态UI渲染与事件处理
@@ -2052,7 +2077,9 @@ function renderDifficultyStagesUI() {
         // 对于最后一个阶段，不显示 "进度 <" 输入框，因为它总是作为最终阶段
         const progressHTML = isLastStage
             ? `<span>(最终阶段)</span>`
-            : `进度&nbsp;&lt;&nbsp;<input type="number" class="ds-progress" value="${stage.progressThreshold.toFixed(2)}" step="0.05" min="0">`;
+            : `进度&nbsp;&lt;&nbsp;<input type="number" class="progress-threshold" value="${stage.progressThreshold.toFixed(
+                  2
+              )}" step="0.05" min="0">`;
 
         row.innerHTML = `
             <small>
@@ -2117,10 +2144,90 @@ function removeDifficultyStage(index) {
     }
 }
 
+// --- 临时槽权重 UI ---
+function renderTempSlotWeightStagesUI() {
+    const container = document.getElementById('dynamic-temp-slot-weight-stages-container');
+    container.innerHTML = '<div><small>根据总螺丝消除进度 (0-1) 设置临时槽权重因子。</small></div>';
+    const stages = gameConfig.TEMP_SLOT_WEIGHT_STAGES;
+
+    console.log(stages);
+
+    stages.forEach((stage, index) => {
+        const stageDiv = document.createElement('div');
+        stageDiv.className = 'stage-config';
+
+        const isLastStage = index === stages.length - 1;
+
+        // 对于最后一个阶段，不显示 "进度 <" 输入框，因为它总是作为最终阶段
+        const progressHTML = isLastStage
+            ? `<span>(最终阶段)</span>`
+            : `进度&nbsp;&lt;&nbsp;<input type="number" class="progress-threshold" value="${+stage.progressThreshold.toFixed(
+                  2
+              )}" step="0.05" min="0" max="1">`;
+        stageDiv.innerHTML = `
+                <span>${index}:</span>
+                ${progressHTML}
+                &nbsp;权重因子: <input type="number" class="weight-factor" value="${stage.weightFactor}" min="0" max="10" step="0.1">
+                &nbsp;<button class="add-stage-btn" data-index="${index}">+</button>
+                &nbsp;<button class="remove-stage-btn" data-index="${index}" ${stages.length === 1 ? 'disabled' : ''}>-</button>
+        `;
+        container.appendChild(stageDiv);
+    });
+
+    // 为按钮绑定事件监听器
+    container.querySelectorAll('.add-stage-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index, 10);
+            addTempSlotWeightStage(index);
+        });
+    });
+
+    container.querySelectorAll('.remove-stage-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index, 10);
+            removeTempSlotWeightStage(index);
+        });
+    });
+}
+
+function addTempSlotWeightStage(index) {
+    const stages = gameConfig.TEMP_SLOT_WEIGHT_STAGES;
+    // 创建一个新阶段，作为当前阶段的副本
+    const newStage = JSON.parse(JSON.stringify(stages[index]));
+
+    // 自动为新阶段设置一个合理的、递增的阈值
+    if (index < stages.length - 1) {
+        newStage.progressThreshold = (stages[index].progressThreshold + stages[index + 1].progressThreshold) / 2;
+    } else {
+        // 如果在最后添加，则将当前最后阶段的阈值变小，新阶段成为新的最终阶段
+        stages[index].progressThreshold = Math.min(0.9, parseFloat((stages[index].progressThreshold - 0.1).toFixed(2)));
+        newStage.progressThreshold = 1.0; // 新阶段是最终阶段
+    }
+    // 确保值是两位小数
+    newStage.progressThreshold = parseFloat(newStage.progressThreshold.toFixed(2));
+
+    stages.splice(index + 1, 0, newStage);
+    // 重新排序以防万一
+    stages.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    renderTempSlotWeightStagesUI(); // 重新渲染整个UI
+}
+
+function removeTempSlotWeightStage(index) {
+    if (gameConfig.TEMP_SLOT_WEIGHT_STAGES.length <= 1) {
+        showMessage('至少需要一个阶段配置');
+        return;
+    }
+    gameConfig.TEMP_SLOT_WEIGHT_STAGES.splice(index, 1);
+    renderTempSlotWeightStagesUI();
+}
+
 renderDifficultyStagesUI();
 
 // 初始化所有动态UI
 renderMultiLockStagesUI();
+
+// 初始化临时槽权重UI
+renderTempSlotWeightStagesUI();
 
 startGame();
 
@@ -2137,6 +2244,24 @@ function weightedRandom(colors, weights) {
     }
     const validColors = colors.filter((c) => weights[c] > 0);
     return validColors.length > 0 ? validColors[validColors.length - 1] : colors[colors.length - 1];
+}
+
+function getTempSlotWeightFactor() {
+    const progress = getProgress();
+    const stages = gameConfig.TEMP_SLOT_WEIGHT_STAGES;
+
+    // 确保 stages 是有效数组且已排序
+    if (!stages || stages.length === 0) {
+        return 1; // 返回一个默认值
+    }
+
+    for (const stage of stages) {
+        if (progress <= stage.progressThreshold) {
+            return stage.weightFactor;
+        }
+    }
+    // 如果进度超过所有阈值，返回最后一个阶段的权重
+    return stages[stages.length - 1].weightFactor;
 }
 
 /**
@@ -2270,7 +2395,7 @@ function setupBox(box, isManualAdd = false) {
 
             const weights = {};
             nonDuplicateCandidates.forEach((c) => {
-                const tempWeight = (tempSlotCounts[c] || 0) * gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
+                const tempWeight = (tempSlotCounts[c] || 0) * getTempSlotWeightFactor();
                 weights[c] = 1 + tempWeight; // 基础权重1 + 额外权重
             });
 
@@ -2306,7 +2431,7 @@ function setupBox(box, isManualAdd = false) {
             }
         });
         turnCandidates.forEach((c) => {
-            const tempWeight = (tempSlotCounts[c] || 0) * gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
+            const tempWeight = (tempSlotCounts[c] || 0) * getTempSlotWeightFactor();
             finalWeights[c] = 1 + tempWeight;
         });
         bestColor = weightedRandom(turnCandidates, finalWeights);
@@ -2692,9 +2817,6 @@ updateDifficultyInfoDisplay(selectedDifficulty);
 
 if (document.getElementById('box-ai-threshold-input')) {
     document.getElementById('box-ai-threshold-input').value = gameConfig.BOX_AI_CHALLENGE_THRESHOLD;
-}
-if (document.getElementById('temp-slot-weight')) {
-    document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
 }
 
 startGame();
