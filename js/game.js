@@ -17,10 +17,11 @@ const gameConfig = {
     CHAIN_LOCK_PROBABILITY: 0.4, // 在生成锁时，创建"链式锁" (A->B->C) 的概率，剩下的是"并联锁" (A->C, B->C)
     TEMP_SLOT_WEIGHT_FACTOR: 1, // 临时槽中颜色影响盒子生成的权重因子
 
-    // 新增：并联锁动态难度配置
+    // 并联锁(单个螺丝被多个螺丝锁住)的数量限制
     MULTI_LOCK_STAGES: [
         { progressThreshold: 0.3, controllerLimit: 2 },
         { progressThreshold: 0.7, controllerLimit: 3 },
+        { progressThreshold: 1.0, controllerLimit: 4 }, // 最终阶段
     ],
 
     // --- 初始生成 (Initial Spawning) ---
@@ -175,6 +176,10 @@ function isAreaOverlapping(newArea, occupiedAreas) {
     return false;
 }
 
+/**
+ * 生成组件
+ * @param {Array} screwColorPlan 螺丝颜色计划
+ */
 function generateComponents(screwColorPlan) {
     const plan = [...screwColorPlan];
     components = [];
@@ -1651,14 +1656,14 @@ function getLockGroupLimit() {
  */
 function getLockControllerLimit() {
     const progress = getProgress();
-    // 使用新的阶段化配置
-    for (const stage of gameConfig.MULTI_LOCK_STAGES) {
+    const stages = gameConfig.MULTI_LOCK_STAGES;
+    for (const stage of stages) {
         if (progress < stage.progressThreshold) {
-            return Math.min(stage.controllerLimit, gameConfig.MAX_CONTROLLERS);
+            return stage.controllerLimit;
         }
     }
-    // 如果超过所有阈值，则使用最终的最大值
-    return gameConfig.MAX_CONTROLLERS;
+    // 如果进度超过所有阈值(理论上不会发生，因为最后一个是1.0), 返回最后一个阶段的配置
+    return stages[stages.length - 1].controllerLimit;
 }
 
 /**
@@ -1726,23 +1731,31 @@ function startGame() {
         gameConfig.TEMP_SLOT_WEIGHT_FACTOR = parseFloat(document.getElementById('temp-slot-weight').value);
     }
 
-    // 新增：读取并联锁阶段配置
-    if (document.getElementById('multi-lock-threshold-1')) {
-        gameConfig.MULTI_LOCK_STAGES = [
-            {
-                progressThreshold: parseFloat(document.getElementById('multi-lock-threshold-1').value),
-                controllerLimit: parseInt(document.getElementById('multi-lock-limit-1').value, 10),
-            },
-            {
-                progressThreshold: parseFloat(document.getElementById('multi-lock-threshold-2').value),
-                controllerLimit: parseInt(document.getElementById('multi-lock-limit-2').value, 10),
-            },
-        ];
-        // 确保阶段按阈值升序排列
-        gameConfig.MULTI_LOCK_STAGES.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    // --- 读取锁链长度配置 ---
+    const newMultiLockStages = [];
+    const multiLockRows = document.querySelectorAll('#dynamic-multilock-stages-container .multilock-stage-row');
+
+    multiLockRows.forEach((row) => {
+        const limitInput = row.querySelector('.multilock-limit');
+        const progressInput = row.querySelector('.multilock-progress');
+        const isLastStage = !progressInput;
+
+        const stageData = {
+            controllerLimit: parseInt(limitInput.value, 10),
+            progressThreshold: isLastStage ? 1.0 : parseFloat(progressInput.value),
+        };
+        newMultiLockStages.push(stageData);
+    });
+
+    if (newMultiLockStages.length > 0) {
+        // 后台修正和排序
+        newMultiLockStages.sort((a, b) => a.progressThreshold - b.progressThreshold);
+        newMultiLockStages[newMultiLockStages.length - 1].progressThreshold = 1.0;
+        gameConfig.MULTI_LOCK_STAGES = newMultiLockStages;
+        renderMultiLockStagesUI(); // 更新UI以显示修正后的值
     }
 
-    // 新增：读取动态难度配置
+    // --- 读取动态难度(锁概率)配置 ---
     const newStages = [];
     const stageRows = document.querySelectorAll('#dynamic-difficulty-stages-container .difficulty-stage-row');
 
@@ -1949,7 +1962,80 @@ if (document.getElementById('temp-slot-weight')) {
     document.getElementById('temp-slot-weight').value = gameConfig.TEMP_SLOT_WEIGHT_FACTOR;
 }
 
-// 新增：初始化动态难度配置面板的UI
+// ===============================================
+// 新增: 动态UI渲染与事件处理
+// ===============================================
+
+// --- 锁链长度(MultiLock) UI ---
+function renderMultiLockStagesUI() {
+    const container = document.getElementById('dynamic-multilock-stages-container');
+    if (!container) return;
+    container.innerHTML = ''; // 清空现有行
+
+    const stages = gameConfig.MULTI_LOCK_STAGES;
+
+    stages.forEach((stage, index) => {
+        const row = document.createElement('div');
+        row.className = 'multilock-stage-row';
+
+        const isLastStage = index === stages.length - 1;
+
+        const progressHTML = isLastStage
+            ? `<span>(最终阶段)</span>`
+            : `进度&nbsp;&lt;&nbsp;<input type="number" class="multilock-progress" value="${stage.progressThreshold.toFixed(
+                  2
+              )}" step="0.05" min="0">`;
+
+        row.innerHTML = `
+            <small>
+                <span>${index}:</span>
+                ${progressHTML}
+                &nbsp;限制: <input type="number" class="multilock-limit" value="${stage.controllerLimit}" step="1" min="1">
+                &nbsp;<button class="add-multilock-btn" data-index="${index}">+</button>
+                &nbsp;<button class="remove-multilock-btn" data-index="${index}" ${stages.length === 1 ? 'disabled' : ''}>-</button>
+            </small>
+        `;
+        container.appendChild(row);
+    });
+
+    // 绑定事件
+    container.querySelectorAll('.add-multilock-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => addMultiLockStage(parseInt(e.target.dataset.index, 10)));
+    });
+    container.querySelectorAll('.remove-multilock-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => removeMultiLockStage(parseInt(e.target.dataset.index, 10)));
+    });
+}
+
+function addMultiLockStage(index) {
+    const stages = gameConfig.MULTI_LOCK_STAGES;
+    const newStage = JSON.parse(JSON.stringify(stages[index])); // 复制当前行
+
+    if (index < stages.length - 1) {
+        newStage.progressThreshold = (stages[index].progressThreshold + stages[index + 1].progressThreshold) / 2;
+    } else {
+        stages[index].progressThreshold = Math.min(0.95, parseFloat((stages[index].progressThreshold - 0.05).toFixed(2)));
+        newStage.progressThreshold = 1.0;
+    }
+    newStage.progressThreshold = parseFloat(newStage.progressThreshold.toFixed(2));
+
+    stages.splice(index + 1, 0, newStage);
+    stages.sort((a, b) => a.progressThreshold - b.progressThreshold);
+    renderMultiLockStagesUI();
+}
+
+function removeMultiLockStage(index) {
+    const stages = gameConfig.MULTI_LOCK_STAGES;
+    if (stages.length > 1) {
+        stages.splice(index, 1);
+        stages[stages.length - 1].progressThreshold = 1.0; // 确保最后一个总是最终阶段
+        renderMultiLockStagesUI();
+    } else {
+        alert('至少需要一个锁链长度阶段。');
+    }
+}
+
+// --- 动态难度(锁概率) UI ---
 function renderDifficultyStagesUI() {
     const container = document.getElementById('dynamic-difficulty-stages-container');
     if (!container) return;
@@ -1966,7 +2052,7 @@ function renderDifficultyStagesUI() {
         // 对于最后一个阶段，不显示 "进度 <" 输入框，因为它总是作为最终阶段
         const progressHTML = isLastStage
             ? `<span>(最终阶段)</span>`
-            : `进度 &lt; <input type="number" class="ds-progress" value="${stage.progressThreshold.toFixed(2)}" step="0.05" min="0">`;
+            : `进度&nbsp;&lt;&nbsp;<input type="number" class="ds-progress" value="${stage.progressThreshold.toFixed(2)}" step="0.05" min="0">`;
 
         row.innerHTML = `
             <small>
@@ -2032,6 +2118,9 @@ function removeDifficultyStage(index) {
 }
 
 renderDifficultyStagesUI();
+
+// 初始化所有动态UI
+renderMultiLockStagesUI();
 
 startGame();
 
