@@ -124,7 +124,7 @@ const getColorTier = (color) => {
 };
 
 function interpolate(start, end, steps, step) {
-    return Math.round(start + (end - start) * (step / (steps - 1)));
+    return Number((start + (end - start) * (step / (steps - 1))).toFixed(2));
 }
 
 for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
@@ -137,6 +137,41 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
         tempSlots: 5, // 临时槽位保持不变
         // --- 锁生成算法参数 ---
         maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
+        // --- 临时槽位权重 ---
+        tempSlotWeightStages: [
+            { progressThreshold: 0.2, weightFactor: interpolate(5, 3, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.4, weightFactor: interpolate(4, 2, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.6, weightFactor: interpolate(3, 1, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 1.0, weightFactor: interpolate(2, 0.4, NUM_DIFFICULTY_LEVELS, i) },
+        ],
+        multiLockStages: [
+            { progressThreshold: 0.2, controllerLimit: interpolate(1, 3, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.4, controllerLimit: interpolate(1, 3, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.6, controllerLimit: interpolate(2, 4, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 1.0, controllerLimit: interpolate(2, 5, NUM_DIFFICULTY_LEVELS, i) }, // 最终阶段
+        ],
+        difficultyStages: [
+            {
+                progressThreshold: 0.2,
+                lockProbFactor: interpolate(0.0, 0.2, NUM_DIFFICULTY_LEVELS, i),
+                connectionMultiplier: interpolate(1.0, 1.2, NUM_DIFFICULTY_LEVELS, i),
+            },
+            {
+                progressThreshold: 0.4,
+                lockProbFactor: interpolate(0.1, 0.4, NUM_DIFFICULTY_LEVELS, i),
+                connectionMultiplier: interpolate(1.0, 1.2, NUM_DIFFICULTY_LEVELS, i),
+            },
+            {
+                progressThreshold: 0.6,
+                lockProbFactor: interpolate(0.2, 0.6, NUM_DIFFICULTY_LEVELS, i),
+                connectionMultiplier: interpolate(1.1, 1.3, NUM_DIFFICULTY_LEVELS, i),
+            },
+            {
+                progressThreshold: 1.0,
+                lockProbFactor: interpolate(0.3, 0.7, NUM_DIFFICULTY_LEVELS, i),
+                connectionMultiplier: interpolate(1.1, 1.5, NUM_DIFFICULTY_LEVELS, i),
+            },
+        ],
     });
 }
 
@@ -1941,6 +1976,21 @@ function updateInputsWithDifficulty(difficulty) {
         if (document.getElementById('max-controllers')) {
             document.getElementById('max-controllers').value = gameConfig.MAX_CONTROLLERS;
         }
+        if (settings.tempSlotWeightStages) {
+            console.log(settings.tempSlotWeightStages);
+            gameConfig.TEMP_SLOT_WEIGHT_STAGES = settings.tempSlotWeightStages;
+            renderTempSlotWeightStagesUI();
+        }
+        if (settings.multiLockStages) {
+            console.log(settings.multiLockStages);
+            gameConfig.MULTI_LOCK_STAGES = settings.multiLockStages;
+            renderMultiLockStagesUI();
+        }
+        if (settings.difficultyStages) {
+            console.log(settings.difficultyStages);
+            gameConfig.DIFFICULTY_STAGES = settings.difficultyStages;
+            renderDifficultyStagesUI();
+        }
     }
 }
 
@@ -2153,7 +2203,7 @@ function renderTempSlotWeightStagesUI() {
     console.log(stages);
 
     stages.forEach((stage, index) => {
-        const stageDiv = document.createElement('div');
+        const stageDiv = document.createElement('small');
         stageDiv.className = 'stage-config';
 
         const isLastStage = index === stages.length - 1;
@@ -2167,7 +2217,7 @@ function renderTempSlotWeightStagesUI() {
         stageDiv.innerHTML = `
                 <span>${index}:</span>
                 ${progressHTML}
-                &nbsp;权重因子: <input type="number" class="weight-factor" value="${stage.weightFactor}" min="0" max="10" step="0.1">
+                &nbsp;权重因子: <input type="number" class="weight-factor" value="${stage.weightFactor}" min="0.0" max="10" step="0.1">
                 &nbsp;<button class="add-stage-btn" data-index="${index}">+</button>
                 &nbsp;<button class="remove-stage-btn" data-index="${index}" ${stages.length === 1 ? 'disabled' : ''}>-</button>
         `;
