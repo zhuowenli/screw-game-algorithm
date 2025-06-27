@@ -2,18 +2,51 @@ const autoBtn = document.getElementById('auto-btn');
 
 function tryClickDot(dot, reason) {
     const screw = screwMap[dot.dataset.sid];
+    if (!screw) return false;
+
     const chain = getChain(screw);
-    const free = tempSlotsState.filter((d) => d === null).length;
-    if (free < chain.length) {
+    const clicksNeeded = chain.length + 1;
+
+    // 更智能地判断是否可点击：计算盒子和临时槽的总容量
+    let potentialSlots = 0;
+    const allScrewsToClick = [...chain, screw];
+
+    // 1. 计算可用的颜色盒子槽位
+    const boxSlotCounts = {};
+    for (const box of boxes) {
+        if (box.dataset.enabled === 'true' && box.dataset.color) {
+            if (!boxSlotCounts[box.dataset.color]) {
+                boxSlotCounts[box.dataset.color] = 0;
+            }
+            const freeSlotsInBox = 3 - [...box.children].filter((s) => s.dataset.filled).length;
+            boxSlotCounts[box.dataset.color] += freeSlotsInBox;
+        }
+    }
+
+    for (const s of allScrewsToClick) {
+        if (boxSlotCounts[s.color] && boxSlotCounts[s.color] > 0) {
+            potentialSlots++;
+            boxSlotCounts[s.color]--; // 模拟占用一个槽位
+        }
+    }
+
+    // 2. 加上可用的临时槽
+    const freeTempSlots = tempSlotsState.filter((d) => d === null).length;
+    potentialSlots += freeTempSlots;
+
+    if (potentialSlots < clicksNeeded) {
         return false;
     }
+
+    // 检查链上的所有螺丝是否真的在棋盘上
     for (const s of chain) {
         if (!s.dot || s.dot.dataset.blocked === 'true') {
+            // 这个判断实际上在getChain的逻辑下有点冗余，因为被锁的才有controller, 但作为安全校验保留
             return false;
         }
     }
-    if (chain.length > 0) {
-    }
+
+    // 按顺序点击解锁链和目标
     for (const s of chain) {
         handleDotClick(s.dot);
     }

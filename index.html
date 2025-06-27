@@ -224,8 +224,8 @@
             width: 400px;
         }
 
-        #difficulty-text {
-            margin-bottom: 10px;
+        .difficulty-text {
+            margin-bottom: 5px;
         }
 
         #difficulty-panel canvas {
@@ -312,8 +312,8 @@
         <div class="config-group">
             <h4>螺丝配置:</h4>
             <div>
-                <label for="box-count">螺丝盒总数:</label>
-                <input id="box-count" type="number" value="50" min="1" max="1000">
+                <label for="screw-count-input">螺丝总数:</label>
+                <input id="screw-count-input" type="number" value="150" min="1" max="1000">
             </div>
             <div>
                 <label for="color-count-input">螺丝颜色数:</label>
@@ -329,29 +329,6 @@
             <div>
                 <label for="temp-count">临时槽数量:</label>
                 <input type="number" id="temp-count" value="5" min="1" max="10">
-            </div>
-            <div id="dynamic-temp-slot-weight-stages-container">
-                <!-- 动态临时槽权重阶段将由JS在此生成 -->
-            </div>
-        </div>
-        <div class="config-group">
-            <h4>锁链长度阶段配置:</h4>
-            <div id="dynamic-multilock-stages-container">
-                <!-- 锁链长度阶段将由JS在此生成 -->
-            </div>
-        </div>
-        <div class="config-group">
-            <h4>动态难度阶段配置:</h4>
-            <div id="dynamic-difficulty-stages-container">
-                <!-- 动态难度阶段将由JS在此生成 -->
-            </div>
-        </div>
-        <div class="config-group">
-            <h4>AI配置:</h4>
-            <div>
-                <label for="box-ai-threshold-input">挑战模式进度阈值(0-1):</label>
-                <input type="number" id="box-ai-threshold-input" value="0.5" min="0.00" max="1.00">
-                <div>(达到进度提升游戏难度，通过AI制造卡点)</div>
             </div>
         </div>
         <div>
@@ -396,7 +373,8 @@
 
     <div id="difficulty-panel">
         <h2>难度信息</h2>
-        <div id="difficulty-text">当前难度:<span id="current-difficulty">-</span></div>
+        <div class="difficulty-text">当前K值:<span id="current-difficulty">-</span></div>
+        <div class="difficulty-text">当前K值索引:<span id="current-difficulty-index">-</span></div>
         <canvas id="difficulty-canvas" width="400" height="200"></canvas>
     </div>
 
