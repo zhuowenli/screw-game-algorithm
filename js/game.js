@@ -124,7 +124,10 @@ const getColorTier = (color) => {
 };
 
 function interpolate(start, end, steps, step) {
-    return Number((start + (end - start) * (step / (steps - 1))).toFixed(2));
+    return Number((start + (end - start) * (step / (steps - 1))).toFixed(1));
+}
+function interpolateNumber(start, end, steps, step) {
+    return Math.round(start + (end - start) * (step / (steps - 1)));
 }
 
 for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
@@ -132,11 +135,11 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
     DIFFICULTY_LEVELS.push({
         level: level,
         // --- 核心参数 ---
-        colors: interpolate(5, 10, NUM_DIFFICULTY_LEVELS, i),
-        boxes: interpolate(40, 60, NUM_DIFFICULTY_LEVELS, i),
+        colors: interpolateNumber(5, 10, NUM_DIFFICULTY_LEVELS, i),
+        boxes: interpolateNumber(40, 60, NUM_DIFFICULTY_LEVELS, i),
         tempSlots: 5, // 临时槽位保持不变
         // --- 锁生成算法参数 ---
-        maxLockGroups: interpolate(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
+        maxLockGroups: interpolateNumber(2, 8, NUM_DIFFICULTY_LEVELS, i), // 场上总锁组数量: 从2个平滑增加到8个
         // --- 临时槽位权重 ---
         tempSlotWeightStages: [
             { progressThreshold: 0.2, weightFactor: interpolate(5, 3, NUM_DIFFICULTY_LEVELS, i) },
@@ -145,10 +148,10 @@ for (let i = 0; i < NUM_DIFFICULTY_LEVELS; i++) {
             { progressThreshold: 1.0, weightFactor: interpolate(2, 0.4, NUM_DIFFICULTY_LEVELS, i) },
         ],
         multiLockStages: [
-            { progressThreshold: 0.2, controllerLimit: interpolate(1, 3, NUM_DIFFICULTY_LEVELS, i) },
-            { progressThreshold: 0.4, controllerLimit: interpolate(1, 3, NUM_DIFFICULTY_LEVELS, i) },
-            { progressThreshold: 0.6, controllerLimit: interpolate(2, 4, NUM_DIFFICULTY_LEVELS, i) },
-            { progressThreshold: 1.0, controllerLimit: interpolate(2, 5, NUM_DIFFICULTY_LEVELS, i) }, // 最终阶段
+            { progressThreshold: 0.2, controllerLimit: interpolateNumber(1, 3, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.4, controllerLimit: interpolateNumber(1, 3, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 0.6, controllerLimit: interpolateNumber(2, 4, NUM_DIFFICULTY_LEVELS, i) },
+            { progressThreshold: 1.0, controllerLimit: interpolateNumber(2, 5, NUM_DIFFICULTY_LEVELS, i) }, // 最终阶段
         ],
         difficultyStages: [
             {
@@ -1755,12 +1758,12 @@ function startGame() {
     COLORS = ALL_COLORS.slice(0, Math.min(colorCnt, ALL_COLORS.length));
     gameConfig.MIN_ONBOARD_SCREWS = parseInt(document.getElementById('min-onboard-screws').value, 10);
 
-    // 从滑块或手动输入更新锁相关的配置
-    const settings = DIFFICULTY_LEVELS.find((d) => d.level === selectedDifficulty);
-    if (settings) {
-        // 对于复杂的、不易手动设置的参数，我们仍然可以依赖难度预设
-        MAX_LOCK_GROUPS = settings.maxLockGroups;
-    }
+    // // 从滑块或手动输入更新锁相关的配置
+    // const settings = DIFFICULTY_LEVELS.find((d) => d.level === selectedDifficulty);
+    // if (settings) {
+    //     // 对于复杂的、不易手动设置的参数，我们仍然可以依赖难度预设
+    //     MAX_LOCK_GROUPS = settings.maxLockGroups;
+    // }
 
     // 从 UI 输入框读取剩余的配置
     if (document.getElementById('max-controllers')) {
@@ -1858,8 +1861,11 @@ function startGame() {
     colorTiers.tier2 = COLORS.slice(4, 7);
     colorTiers.tier3 = COLORS.slice(7);
 
+    // 1. 先生成盒子
     const localBoxColorPlan = planBoxes(TOTAL_BOXES, COLORS);
     boxColorQueue = [...localBoxColorPlan];
+
+    // 2. 再生成螺丝
     const screwColorPlan = planColorDistribution(localBoxColorPlan, COLORS);
     TOTAL_SCREWS = screwColorPlan.length;
 
@@ -1884,7 +1890,11 @@ function startGame() {
     // Setup game
     createGrid();
     initTempSlots();
+
+    // 3. 生成组件
     generateComponents(screwColorPlan);
+
+    // 4. 初始化棋盘
     initPools();
     initBoardState();
 
@@ -2015,6 +2025,7 @@ function createDifficultyButtons() {
 
             updateInputsWithDifficulty(selectedDifficulty);
             updateDifficultyInfoDisplay(selectedDifficulty);
+            startGame();
         });
         difficultyButtonsContainer.appendChild(button);
     }
