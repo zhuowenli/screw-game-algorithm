@@ -75,35 +75,11 @@ function autoPlayStep() {
             }
         }
     }
-
-    let bestPlate = null;
-    let bestDots = null;
-    let bestCount = Infinity;
-    const freeSlots = tempSlotsState.filter((d) => d === null).length;
-    for (const plate of activePlates) {
-        const dots = plate.screws.map((s) => s.dot).filter(Boolean);
-        if (dots.length === 0) {
-            continue;
-        }
-        if (dots.length < freeSlots && dots.length < bestCount) {
-            bestPlate = plate;
-            bestDots = dots;
-            bestCount = dots.length;
-        }
+    const onBoardTotal = Object.values(screwMap).filter((s) => s.dot).length;
+    if (onBoardTotal <= 0) {
+        stopAutoPlay();
+        return;
     }
-    const emptySlots = tempSlotsState.filter((d) => d === null).length;
-
-    if (bestPlate && emptySlots > 1) {
-        for (const dot of bestDots) {
-            if (dot.dataset.blocked !== 'true') {
-                console.log('没有匹配颜色螺丝，尝试解锁板块螺丝:', dot);
-                if (tryClickDot(dot, 'min plate ' + bestCount)) {
-                    return;
-                }
-            }
-        }
-    }
-
     console.log('自动点击失败');
 }
 

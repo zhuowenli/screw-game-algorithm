@@ -288,51 +288,40 @@ function setupBox(box) {
         return;
     }
 
-    // 核心改动：候选颜色直接来源于场上和临时槽中所有可用的螺丝
-    const onBoardScrews = Object.values(screwMap).filter((s) => s.dot && !s.locked);
-    const tempScrews = tempSlotsState.filter((d) => d).map((d) => screwMap[d.dataset.sid]);
-    const availableScrews = [...onBoardScrews, ...tempScrews].filter(Boolean); // filter(Boolean) to remove undefined if screw not in map
+    const onBoardBoxColors = new Set([...document.querySelectorAll('.box[data-enabled="true"][data-color]')].map((b) => b.dataset.color));
+    const totalScrewsOnBoard = Object.values(screwMap).filter((s) => s.dot).length;
 
-    let candidateColors = [...new Set(availableScrews.map((s) => s.color))];
+    let candidateColors;
 
-    // 如果没有可用的螺丝（比如全被锁了），则进入死锁状态
-    if (candidateColors.length === 0) {
-        const totalScrewsOnBoard = Object.values(screwMap).filter((s) => s.dot).length;
-        // 开局特殊处理：如果场上一个螺丝都没有，就随机生成一个颜色的盒子
-        if (totalScrewsOnBoard === 0) {
-            candidateColors = [COLORS[Math.floor(Math.random() * COLORS.length)]];
-        } else {
-            // 如果场上有螺丝但都不可用（被锁），则判定为死锁
-            const remainingOnBoard = Object.values(screwMap).filter((s) => s.dot).length > 0;
-            if (remainingOnBoard) {
-                box.dataset.enabled = 'false';
-                box.classList.remove('enabled');
-                box.style.borderColor = '#ccc';
-                box.innerHTML = '<div class="hint">死锁</div>';
-            } else {
-                checkVictory(); // No screws left, check for win
-            }
-            console.log('candidateColors', candidateColors);
-            return;
+    // [修复] 为初始化和游戏进行中设置不同的颜色选择逻辑
+    if (totalScrewsOnBoard === 0) {
+        // --- 初始化阶段 ---
+        // 严格地从所有颜色中，选择一个不在场上的
+        candidateColors = COLORS.filter((c) => !onBoardBoxColors.has(c));
+    } else {
+        // --- 游戏进行中阶段 ---
+        // 1. 基于场上可用螺丝决定可选颜色
+        const onBoardScrews = Object.values(screwMap).filter((s) => s.dot && !s.locked);
+        const tempScrews = tempSlotsState.filter((d) => d).map((d) => screwMap[d.dataset.sid]);
+        const availableScrews = [...onBoardScrews, ...tempScrews].filter(Boolean);
+        const availableScrewColors = [...new Set(availableScrews.map((s) => s.color))];
+
+        // 2. 优先选择不在场上的颜色
+        candidateColors = availableScrewColors.filter((c) => !onBoardBoxColors.has(c));
+
+        // 3. 兜底逻辑: 如果所有可用颜色都在场上了，则允许重复
+        if (candidateColors.length === 0 && availableScrewColors.length > 0) {
+            candidateColors = availableScrewColors;
         }
     }
 
-    const onBoardBoxColors = new Set([...document.querySelectorAll('.box[data-enabled="true"][data-color]')].map((b) => b.dataset.color));
-
-    let preferredColors = candidateColors.filter((c) => !onBoardBoxColors.has(c));
-
-    // Fallback: if all available colors are already on board, use them all.
-    if (preferredColors.length === 0) {
-        if (candidateColors.length > 0) {
-            preferredColors = candidateColors;
-        } else {
-            // No colors available at all
-            box.dataset.enabled = 'false';
-            box.classList.remove('enabled');
-            box.style.borderColor = '#ccc';
-            box.innerHTML = '<div class="hint">无</div>';
-            return;
-        }
+    // 如果经过所有逻辑判断后，依然没有候选颜色，则不生成盒子
+    if (candidateColors.length === 0) {
+        box.dataset.enabled = 'false';
+        box.classList.remove('enabled');
+        box.style.borderColor = '#ccc';
+        box.innerHTML = '<div class="hint">无</div>';
+        return;
     }
 
     // K-value weighting logic
@@ -350,16 +339,16 @@ function setupBox(box) {
     });
     const totalOnboardScrews = Object.values(onBoardUnlockedStats).reduce((a, b) => a + b, 0);
     const weights = {};
-    preferredColors.forEach((color) => {
+    candidateColors.forEach((color) => {
         const count = onBoardUnlockedStats[color] || 0;
         const weight = count * (1 - kRatio) + (1 / (count + 1)) * totalOnboardScrews * kRatio;
         weights[color] = Math.max(0.1, weight);
     });
-    let bestColor = weightedRandom(preferredColors, weights);
+    let bestColor = weightedRandom(candidateColors, weights);
 
     // Anti-repeat logic (for just-completed color)
-    if (lastCompletedColor && preferredColors.length > 1 && bestColor === lastCompletedColor) {
-        const filteredCandidates = preferredColors.filter((c) => c !== lastCompletedColor);
+    if (lastCompletedColor && candidateColors.length > 1 && bestColor === lastCompletedColor) {
+        const filteredCandidates = candidateColors.filter((c) => c !== lastCompletedColor);
         if (filteredCandidates.length > 0) {
             bestColor = filteredCandidates[Math.floor(Math.random() * filteredCandidates.length)];
         }
