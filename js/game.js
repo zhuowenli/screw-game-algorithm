@@ -7,14 +7,6 @@
 // [新系统] K值难度系统代码
 // =================================================================
 
-// 默认K值曲线 (前松后紧)
-const NEW_DEFAULT_K_VALUES = Array.from({ length: 200 }, (_, i) => {
-    const progress = i / 199;
-    // 使用三次方曲线来模拟 "前松后紧" 的难度增长
-    const k = 1 + progress ** 3 * 9;
-    return parseFloat(k.toFixed(1));
-});
-
 const gameConfig = {
     // --- 棋盘与布局 (Board & Layout) ---
     ROWS: 36,
@@ -30,7 +22,15 @@ const gameConfig = {
     // --- 关卡配置 (Level Configuration) ---
     SCREW_COUNT: 150, // 目标螺丝总数
     COLOR_COUNT: 7, // 颜色数量
-    K_VALUES: NEW_DEFAULT_K_VALUES, // 难度K值曲线
+    K_VALUES: [], // [新增] 此数组将由下面的控制点动态生成
+    K_CONTROL_POINTS: [
+        // [新增] 用少量控制点来定义K值曲线的形状
+        { x: 0, y: 0.1 },
+        { x: 37, y: 0.2 },
+        { x: 75, y: 0.5 },
+        { x: 112, y: 0.8 },
+        { x: 149, y: 1.0 },
+    ],
 
     // --- 部件生成配置 (Component Generation) ---
     COMPONENT_CONFIG: {
@@ -163,6 +163,7 @@ let activeRegionIndex = -1;
 let nextComponentId = 0;
 let currentScrewIndex = 0; // K值曲线指针
 let lastRemovedCell = null;
+let initialBoxStates = null;
 
 let COLOR_TOTALS = {};
 let boxesCompletedCount = 0;
@@ -197,6 +198,9 @@ const eliminatedScrewIds = new Set();
 let hintMessageShown = false;
 let lastCompletedColor = null;
 
+const colorAllocationSystem = new DynamicColorAllocationSystem();
+let kValueChart = null;
+
 // =================================================================
 // 核心算法 (Core Algorithms) - K值驱动
 // =================================================================
@@ -206,172 +210,116 @@ let lastCompletedColor = null;
  */
 function getCurrentK() {
     const kCurve = gameConfig.K_VALUES;
-    if (!kCurve || kCurve.length === 0) return 1; // Default to easy if not configured
+    if (!kCurve || kCurve.length === 0) return 0; // 默认为最简单
     const index = Math.max(0, Math.min(currentScrewIndex, kCurve.length - 1));
     return kCurve[index];
 }
 
 /**
- * [重构] 根据K值为新生成的螺丝分配颜色和锁链状态
+ * [重构] 螺丝颜色分配已移至 spawnPartState 批量处理，此函数已废弃
  */
-function setupScrew(screw) {
-    if (!screw) return;
-
-    const K = getCurrentK();
-    const maxK = 10;
-    const kRatio = K / maxK;
-
-    // 1. 颜色分配
-    const boxColors = [...new Set([...document.querySelectorAll('.box[data-enabled="true"]')].map((b) => b.dataset.color))];
-    const otherColors = COLORS.filter((c) => !boxColors.includes(c));
-    const targetColorProb = Math.max(0.2, 1 - kRatio * 0.7);
-
-    let assignedColor;
-    if (boxColors.length > 0 && Math.random() < targetColorProb) {
-        assignedColor = boxColors[Math.floor(Math.random() * boxColors.length)];
-    } else if (otherColors.length > 0) {
-        assignedColor = otherColors[Math.floor(Math.random() * otherColors.length)];
-    } else {
-        assignedColor = COLORS[Math.floor(Math.random() * COLORS.length)];
-    }
-    screw.setScrewColor(assignedColor);
-
-    // 2. 锁链状态分配
-    const lockProb = 0.1 + kRatio * 0.8;
-    screw.isLocked = Math.random() < lockProb;
-
-    // 推进K值曲线指针
-    currentScrewIndex++;
-}
+// function setupScrew(screw) { ... }
 
 /**
- * [重构] 设置锁定关系
- * K值已在 setupScrew 中决定了哪些螺丝要被锁，这里只负责执行连接
+ * [重构] 统一设置或补充所有需要颜色的盒子
  */
-function setupLocks(newScrews) {
-    if (!newScrews) return;
+function setupOrRefillBoxes() {
+    // 1. 准备输入数据
+    const input = _createAllocationInput();
+    const boxesToFill = input.colorBoxes.filter((b) => b.isEnabled && !b.color);
 
-    const allOnBoardScrews = Object.values(screwMap).filter((s) => s.dot && s.cell);
-    const screwsToLock = newScrews.filter((s) => s.isLocked && s.dot); // 确保螺丝在棋盘上
-
-    for (const locked of screwsToLock) {
-        const potentialControllers = allOnBoardScrews.filter(
-            (c) =>
-                c.id !== locked.id &&
-                c.componentId !== locked.componentId && // 不能是同一部件的
-                !c.control && // 控制器是自由的
-                canControl(c, locked)
-        );
-
-        if (potentialControllers.length > 0) {
-            // 简单点，随机选一个最近的
-            potentialControllers.sort((a, b) => {
-                const distA = Math.abs(a.cell.dataset.row - locked.cell.dataset.row) + Math.abs(a.cell.dataset.col - locked.cell.dataset.col);
-                const distB = Math.abs(b.cell.dataset.row - locked.cell.dataset.row) + Math.abs(b.cell.dataset.col - locked.cell.dataset.col);
-                return distA - distB;
-            });
-            applyLock(potentialControllers[0], locked);
+    // 如果没有需要填充的盒子，直接返回
+    if (boxesToFill.length === 0) {
+        // 但如果一个可用螺丝都没有了，还是要检查下胜利/死锁
+        const onBoardScrews = Object.values(screwMap).filter((s) => s.dot).length;
+        const tempScrews = tempSlotsState.filter((d) => d).length;
+        if (onBoardScrews === 0 && tempScrews === 0) {
+            checkVictory();
         }
-    }
-}
-
-/**
- * [重构] 设置盒子颜色，基于K值
- */
-function setupBox(box) {
-    const onBoardBoxCount = [...document.querySelectorAll('.box[data-enabled="true"][data-color]')].length;
-    if (boxesCompletedCount + onBoardBoxCount >= TOTAL_BOXES) {
-        box.dataset.enabled = 'false';
-        box.classList.remove('enabled');
-        box.style.borderColor = '#ccc';
-        box.innerHTML = '<div class="hint">无</div>';
         return;
     }
 
-    const onBoardBoxColors = new Set([...document.querySelectorAll('.box[data-enabled="true"][data-color]')].map((b) => b.dataset.color));
-    const totalScrewsOnBoard = Object.values(screwMap).filter((s) => s.dot).length;
+    // 2. 调用决策系统
+    const output = colorAllocationSystem.executeAllocation(input);
 
-    let candidateColors;
+    // 3. 应用决策结果
+    if (output.boxColorAssignments.length > 0) {
+        output.boxColorAssignments.forEach((assignment) => {
+            const box = document.getElementById(`box-${assignment.boxId}`);
+            if (!box) return;
 
-    // [修复] 为初始化和游戏进行中设置不同的颜色选择逻辑
-    if (totalScrewsOnBoard === 0) {
-        // --- 初始化阶段 ---
-        // 严格地从所有颜色中，选择一个不在场上的
-        candidateColors = COLORS.filter((c) => !onBoardBoxColors.has(c));
-    } else {
-        // --- 游戏进行中阶段 ---
-        // 1. 基于场上可用螺丝决定可选颜色
-        const onBoardScrews = Object.values(screwMap).filter((s) => s.dot && !s.locked);
-        const tempScrews = tempSlotsState.filter((d) => d).map((d) => screwMap[d.dataset.sid]);
-        const availableScrews = [...onBoardScrews, ...tempScrews].filter(Boolean);
-        const availableScrewColors = [...new Set(availableScrews.map((s) => s.color))];
+            const color = assignment.assignedColor;
+            box.dataset.color = color;
+            box.dataset.enabled = 'true';
+            box.classList.add('enabled');
+            box.style.borderColor = color;
+            box.innerHTML = '';
+            usedBoxColors.add(color);
 
-        // 2. 优先选择不在场上的颜色
-        candidateColors = availableScrewColors.filter((c) => !onBoardBoxColors.has(c));
-
-        // 3. 兜底逻辑: 如果所有可用颜色都在场上了，则允许重复
-        if (candidateColors.length === 0 && availableScrewColors.length > 0) {
-            candidateColors = availableScrewColors;
-        }
-    }
-
-    // 如果经过所有逻辑判断后，依然没有候选颜色，则不生成盒子
-    if (candidateColors.length === 0) {
-        box.dataset.enabled = 'false';
-        box.classList.remove('enabled');
-        box.style.borderColor = '#ccc';
-        box.innerHTML = '<div class="hint">无</div>';
-        return;
-    }
-
-    // K-value weighting logic
-    const K = getCurrentK();
-    const maxK = 10;
-    const kRatio = K / maxK;
-    const onBoardUnlockedStats = {};
-    COLORS.forEach((c) => (onBoardUnlockedStats[c] = 0));
-    Object.values(screwMap).forEach((s) => {
-        if (s.dot && !s.locked) {
-            if (onBoardUnlockedStats[s.color] !== undefined) {
-                onBoardUnlockedStats[s.color]++;
+            for (let i = 0; i < 3; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'slot';
+                box.appendChild(slot);
             }
-        }
-    });
-    const totalOnboardScrews = Object.values(onBoardUnlockedStats).reduce((a, b) => a + b, 0);
-    const weights = {};
-    candidateColors.forEach((color) => {
-        const count = onBoardUnlockedStats[color] || 0;
-        const weight = count * (1 - kRatio) + (1 / (count + 1)) * totalOnboardScrews * kRatio;
-        weights[color] = Math.max(0.1, weight);
-    });
-    let bestColor = weightedRandom(candidateColors, weights);
-
-    // Anti-repeat logic (for just-completed color)
-    if (lastCompletedColor && candidateColors.length > 1 && bestColor === lastCompletedColor) {
-        const filteredCandidates = candidateColors.filter((c) => c !== lastCompletedColor);
-        if (filteredCandidates.length > 0) {
-            bestColor = filteredCandidates[Math.floor(Math.random() * filteredCandidates.length)];
-        }
+            absorbTempDots(color, box);
+        });
+        updateInfo();
+    } else {
+        // 如果有盒子需要填充，但系统没有给出任何分配方案，则判定为死锁
+        boxesToFill.forEach((boxInfo) => {
+            const box = document.getElementById(`box-${boxInfo.boxId}`);
+            if (box) {
+                box.dataset.enabled = 'false';
+                box.classList.remove('enabled');
+                box.style.borderColor = '#ccc';
+                box.innerHTML = '<div class="hint">死锁</div>';
+            }
+        });
     }
-    lastCompletedColor = null;
+}
 
-    // Set box color
-    const color = bestColor;
-    box.dataset.color = color;
-    box.dataset.enabled = 'true';
-    box.classList.add('enabled');
-    box.style.borderColor = color;
-    box.innerHTML = '';
-    usedBoxColors.add(color);
+/**
+ * [新增] 创建分配系统输入对象的辅助函数
+ */
+function _createAllocationInput(newUncoloredScrews = []) {
+    const input = new AllocationInput();
 
-    for (let i = 0; i < 3; i++) {
-        const slot = document.createElement('div');
-        slot.className = 'slot';
-        box.appendChild(slot);
-    }
+    // 1. 在场螺丝信息 (包括传入的无色螺丝)
+    const onBoardScrewInfos = Object.values(screwMap)
+        .filter((s) => s.dot)
+        .map((s) => new OnFieldScrewInfo(s.id, s.color, s.componentId, s.locked));
 
-    absorbTempDots(color, box);
-    updateInfo();
+    const newScrewInfos = newUncoloredScrews.map((s) => new OnFieldScrewInfo(s.id, null, s.componentId, false));
+
+    input.currentOnFieldScrews = [...onBoardScrewInfos, ...newScrewInfos];
+
+    // 2. 颜色盒子状态
+    input.colorBoxes = [...boxes].map((b, index) => {
+        const boxId = parseInt(b.id.split('-')[1]);
+        // 如果盒子已启用但无颜色，这就是要分配的盒子
+        const color = b.dataset.enabled === 'true' ? b.dataset.color : null;
+        const boxInfo = new ColorBoxInfo(boxId, color, b.dataset.enabled === 'true', b.dataset.isAdunlocked === 'true');
+        boxInfo.slots = [...b.querySelectorAll('.slot')].map((slot, slotIndex) => {
+            const isOccupied = slot.dataset.filled === 'true';
+            return new BoxSlotInfo(slotIndex, isOccupied, isOccupied ? slot.dataset.sid : null);
+        });
+        return boxInfo;
+    });
+
+    // 3. 临时槽位状态
+    input.temporarySlots = tempSlotsState.map((dot, index) => {
+        const isOccupied = !!dot;
+        const screw = isOccupied ? screwMap[dot.dataset.sid] : null;
+        return new TemporarySlotInfo(index, isOccupied, isOccupied ? screw.id : null, isOccupied ? screw.color : null);
+    });
+
+    // 4. 难度与配置
+    input.difficultyK = getCurrentK();
+    input.allAvailableColors = COLORS;
+    input.totalScrewCount = TOTAL_SCREWS;
+    input.eliminatedScrewCount = eliminatedScrewIds.size;
+
+    return input;
 }
 
 // =================================================================
@@ -379,6 +327,12 @@ function setupBox(box) {
 // =================================================================
 
 function startGame() {
+    // On first run, capture the initial state of boxes.
+    if (initialBoxStates === null) {
+        initialBoxStates = Array.from(document.querySelectorAll('.box')).map((b) => b.dataset.enabled === 'true');
+    }
+    resetBoxes();
+
     // 1. 读取UI配置
     gameConfig.SCREW_COUNT = parseInt(document.getElementById('screw-count-input').value, 10);
     gameConfig.COLOR_COUNT = parseInt(document.getElementById('color-count-input').value, 10);
@@ -400,7 +354,7 @@ function startGame() {
     for (const k in screwMap) delete screwMap[k];
     regions = [];
     activeRegionIndex = -1;
-    window.currentScrewIndex = 0;
+    currentScrewIndex = 0;
     COLOR_TOTALS = {};
     COLORS.forEach((c) => (COLOR_TOTALS[c] = 0));
     boxesCompletedCount = 0;
@@ -408,6 +362,7 @@ function startGame() {
     // 3. 设置游戏环境
     createGrid();
     initTempSlots();
+    generateKValuesFromControlPoints(); // [新增] 根据控制点生成初始K值曲线
 
     // 4. 生成关卡数据结构（不带颜色）
     generateLevelData();
@@ -431,6 +386,7 @@ function startGame() {
     // 9. 更新UI
     updateInfo();
     showMessage('');
+    initKValueChart();
 }
 
 /**
@@ -587,14 +543,25 @@ function spawnPartState(part, stateIndex) {
     part.activeStateIndex = stateIndex;
     stateToSpawn.isActive = true;
 
-    // [核心改动] 为螺丝动态分配颜色和锁定状态
-    stateToSpawn.screws.forEach((screw) => {
-        setupScrew(screw); // 调用新函数
-        // 更新颜色统计
-        if (COLOR_TOTALS[screw.color] !== undefined) {
-            COLOR_TOTALS[screw.color]++;
-        } else {
-            COLOR_TOTALS[screw.color] = 1;
+    // [核心改动] 批量为螺丝分配颜色
+    const screwsToColor = stateToSpawn.screws;
+    // 1. 创建输入 (明确传入需要上色的螺丝)
+    const colorInput = _createAllocationInput(screwsToColor);
+    // 2. 调用系统决策
+    const colorOutput = colorAllocationSystem.executeAllocation(colorInput);
+    // 3. 应用决策结果
+    colorOutput.screwColorAssignments.forEach((assignment) => {
+        const screw = screwMap[assignment.screwId];
+        if (screw) {
+            screw.setScrewColor(assignment.assignedColor);
+            // 更新颜色统计
+            if (COLOR_TOTALS[screw.color] !== undefined) {
+                COLOR_TOTALS[screw.color]++;
+            } else {
+                COLOR_TOTALS[screw.color] = 1;
+            }
+            // 推进K值曲线指针 (每次成功分配一个螺丝颜色就推进)
+            currentScrewIndex++;
         }
     });
 
@@ -655,9 +622,6 @@ function spawnPartState(part, stateIndex) {
         screw.dot = spawnDot(screw, cell);
         screw.dot.style.zIndex = 20;
     }
-
-    // [核心改动] 颜色分配完后再设置锁
-    setupLocks(stateToSpawn.screws);
 
     updateInfo();
     return true;
@@ -826,12 +790,6 @@ function cleanupScrew(screw) {
         screw.cell.dataset.componentId = '';
         screw.cell = null;
     }
-    // 移除所有与此螺丝相关的锁链
-    lockConnections.slice().forEach((conn) => {
-        if (conn.controller === screw || conn.locked === screw) {
-            removeConnection(conn);
-        }
-    });
     const part = findPartByScrewId(screw.id);
     if (part) {
         checkStateCompletion(part);
@@ -841,25 +799,6 @@ function cleanupScrew(screw) {
 // =================================================================
 // 辅助函数与工具 (Helpers & Utilities)
 // =================================================================
-
-function weightedRandom(items, weights) {
-    let totalWeight = 0;
-    for (const item of items) {
-        totalWeight += weights[item] || 0;
-    }
-
-    let random = Math.random() * totalWeight;
-    for (const item of items) {
-        const weight = weights[item] || 0;
-        if (random < weight) {
-            return item;
-        }
-        random -= weight;
-    }
-
-    return items[items.length - 1]; // Fallback
-}
-
 function createGrid() {
     for (let row = 0; row < gameConfig.ROWS; row++) {
         cellMap[row] = [];
@@ -913,6 +852,13 @@ function spawnDot(screw, cell) {
     dot.dataset.color = screw.color;
     dot.dataset.sid = screw.id;
     dot.dataset.blocked = 'false';
+
+    // [新增] 添加螺丝ID显示
+    const idDisplay = document.createElement('div');
+    idDisplay.className = 'screw-id-display';
+    idDisplay.textContent = screw.id;
+    dot.appendChild(idDisplay);
+
     dot.addEventListener('click', () => handleDotClick(dot));
     cell.appendChild(dot);
     return dot;
@@ -974,10 +920,15 @@ function checkAndProcessBoxMatch(box) {
                 }
             });
             boxesCompletedCount++;
-
             usedBoxColors.delete(color);
-            lastCompletedColor = color;
-            setupBox(box);
+
+            // [核心修改] 先清理盒子状态，再调用统一的填充函数
+            box.innerHTML = '';
+            delete box.dataset.color;
+            delete box.dataset.isAdunlocked; // 重置广告状态
+
+            setupOrRefillBoxes();
+
             showMessage('🎉 三消成功！');
             setTimeout(() => showMessage(''), 1500);
             updateInfo();
@@ -1019,11 +970,12 @@ function absorbTempDots(color, box) {
 
 function initBoxes() {
     usedBoxColors.clear();
-    boxes.forEach((box) => {
+    boxes.forEach((box, index) => {
+        box.id = `box-${index}`; // 为盒子添加唯一ID
         box.innerHTML = '';
-        if (box.dataset.enabled === 'true') {
-            setupBox(box);
-        } else {
+        delete box.dataset.color;
+        delete box.dataset.isAdunlocked;
+        if (box.dataset.enabled !== 'true') {
             const hint = document.createElement('div');
             hint.className = 'hint';
             hint.textContent = '点击开启';
@@ -1032,26 +984,38 @@ function initBoxes() {
             box.addEventListener(
                 'click',
                 () => {
-                    setupBox(box);
-                    const hintElement = box.querySelector('.hint');
-                    if (hintElement) hintElement.remove();
+                    // [核心修改] 点击后，只更新状态，然后调用统一的填充函数
+                    box.dataset.enabled = 'true';
+                    box.dataset.isAdunlocked = 'true';
+                    hint.remove();
+                    setupOrRefillBoxes();
                 },
                 { once: true }
             );
         }
     });
+    // [核心修改] 最后统一调用一次，填充所有初始时就启用的盒子
+    setupOrRefillBoxes();
 }
 
 function resetBoxes() {
-    const initialBoxStates = Array.from(document.querySelectorAll('.box')).map((b) => b.dataset.enabled === 'true');
-    const container = document.querySelector('.boxes');
+    // [修复] 通过第一个box找到其父容器，而不是硬编码'.boxes'选择器
+    const firstBox = document.querySelector('.box');
+    if (!firstBox || !firstBox.parentElement) {
+        console.error('无法找到盒子容器，重置失败。');
+        return;
+    }
+    const container = firstBox.parentElement;
     container.innerHTML = '';
-    initialBoxStates.forEach((enabled) => {
-        const box = document.createElement('div');
-        box.className = 'box';
-        box.dataset.enabled = enabled ? 'true' : 'false';
-        container.appendChild(box);
-    });
+    if (initialBoxStates) {
+        initialBoxStates.forEach((enabled, index) => {
+            const box = document.createElement('div');
+            box.className = 'box';
+            box.id = `box-${index}`; // 重置时也添加ID
+            box.dataset.enabled = enabled ? 'true' : 'false';
+            container.appendChild(box);
+        });
+    }
     boxes = document.querySelectorAll('.box');
 }
 
@@ -1098,96 +1062,6 @@ function getChain(screw) {
         chain.unshift(current);
     }
     return chain;
-}
-
-// =================================================================
-// 锁链相关函数 (Locking Logic)
-// =================================================================
-
-function canControl(controller, target) {
-    if (controller.control) return false;
-    if (!controller.cell || !target.cell) return false;
-
-    const dist = Math.abs(controller.cell.dataset.row - target.cell.dataset.row) + Math.abs(controller.cell.dataset.col - target.cell.dataset.col);
-    if (dist > gameConfig.MAX_INTER_COMPONENT_LOCK_DISTANCE) return false;
-
-    let c = controller;
-    let depth = 1;
-    while (c) {
-        if (c === target) return false;
-        c = c.controller;
-        depth++;
-        if (depth > gameConfig.MAX_CHAIN_LENGTH) return false;
-    }
-    return true;
-}
-
-function applyLock(controller, locked) {
-    if (!locked.controllers.includes(controller)) locked.controllers.push(controller);
-    controller.control = locked;
-    if (!locked.controller) locked.controller = controller;
-    locked.locked = true;
-    if (locked.dot) {
-        locked.dot.dataset.blocked = 'true';
-        locked.dot.classList.add('blocked');
-        if (!locked.overlay) {
-            const ov = document.createElement('div');
-            ov.className = 'lock-overlay';
-            ov.textContent = '🔒';
-            locked.dot.appendChild(ov);
-            locked.overlay = ov;
-        }
-    }
-    if (controller.dot && locked.dot) {
-        const line = drawLine(controller.dot, locked.dot);
-        lockConnections.push({ controller, locked, line });
-    }
-    return true;
-}
-
-function removeConnection(conn) {
-    conn.line && conn.line.remove();
-    conn.locked.controllers = conn.locked.controllers.filter((c) => c !== conn.controller);
-    if (conn.locked.controllers.length === 0) {
-        if (conn.locked.overlay) {
-            conn.locked.overlay.remove();
-            conn.locked.overlay = null;
-        }
-        if (conn.locked.dot) {
-            conn.locked.dot.dataset.blocked = 'false';
-            conn.locked.dot.classList.remove('blocked');
-        }
-        conn.locked.locked = false;
-        conn.locked.controller = null;
-    } else {
-        if (conn.locked.controller === conn.controller) {
-            conn.locked.controller = conn.locked.controllers[0];
-        }
-    }
-    conn.controller.control = null;
-    lockConnections = lockConnections.filter((c) => c !== conn);
-}
-
-function drawLine(fromDot, toDot) {
-    const p1 = getDotCenter(fromDot);
-    const p2 = getDotCenter(toDot);
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', p1.x);
-    line.setAttribute('y1', p1.y);
-    line.setAttribute('x2', p2.x);
-    line.setAttribute('y2', p2.y);
-    line.classList.add('line');
-    lineLayer.appendChild(line);
-    return line;
-}
-
-function getDotCenter(dot) {
-    const br = board.getBoundingClientRect();
-    const dr = dot.getBoundingClientRect();
-    return {
-        x: dr.left - br.left + dr.width / 2,
-        y: dr.top - br.top + dr.height / 2,
-    };
 }
 
 // =================================================================
@@ -1252,41 +1126,143 @@ function updateDifficultyDisplay() {
     const currentK = getCurrentK();
     currentDifficultyEl.textContent = currentK.toFixed(2);
     currentDifficultyIndexEl.textContent = currentScrewIndex;
-    drawKValueChart();
+
+    if (kValueChart) {
+        // 更新图表上的红色进度条
+        const annotation = kValueChart.options.plugins.annotation.annotations.progressLine;
+        annotation.value = currentScrewIndex;
+        kValueChart.update('none');
+    }
 }
 
-function drawKValueChart() {
+/**
+ * [新增] Catmull-Rom样条插值函数
+ * 根据一组控制点生成平滑的K值曲线
+ */
+function generateKValuesFromControlPoints() {
+    const controlPoints = gameConfig.K_CONTROL_POINTS;
+    const kValues = new Array(gameConfig.SCREW_COUNT).fill(0);
+    const lastCpIndex = controlPoints.length - 1;
+
+    for (let i = 0; i < lastCpIndex; i++) {
+        const p0 = i > 0 ? controlPoints[i - 1] : controlPoints[i];
+        const p1 = controlPoints[i];
+        const p2 = controlPoints[i + 1];
+        const p3 = i < lastCpIndex - 1 ? controlPoints[i + 2] : p2;
+
+        const startX = Math.round(p1.x);
+        const endX = Math.round(p2.x);
+
+        for (let x = startX; x <= endX; x++) {
+            if (x >= kValues.length) continue;
+
+            let t = endX - startX === 0 ? 0 : (x - startX) / (endX - startX);
+
+            const t2 = t * t;
+            const t3 = t2 * t;
+
+            const y =
+                0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+            kValues[x] = Math.max(0, Math.min(1, parseFloat(y.toFixed(2))));
+        }
+    }
+    gameConfig.K_VALUES = kValues;
+}
+
+function initKValueChart() {
+    if (kValueChart) {
+        kValueChart.destroy();
+    }
     if (!difficultyCanvas) return;
     const ctx = difficultyCanvas.getContext('2d');
-    const width = difficultyCanvas.width;
-    const height = difficultyCanvas.height;
-    const kCurve = gameConfig.K_VALUES;
-    const maxK = 10;
-    const totalScrews = gameConfig.SCREW_COUNT;
 
-    ctx.clearRect(0, 0, width, height);
+    // 生成背景曲线的标签和数据
+    const backgroundLabels = gameConfig.K_VALUES.map((_, i) => i);
 
-    // Draw background K-curve
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.moveTo(0, height);
-    for (let i = 0; i < kCurve.length; i++) {
-        const x = (i / (kCurve.length - 1)) * width;
-        const y = height - ((kCurve[i] - 1) / (maxK - 1)) * (height - 10) - 5;
-        ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+    kValueChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: backgroundLabels, // X轴标签使用完整长度
+            datasets: [
+                {
+                    // Dataset 0: 完整的、平滑的K值曲线 (用于显示)
+                    label: 'K Value Curve',
+                    data: gameConfig.K_VALUES,
+                    borderColor: 'rgba(75, 192, 192, 0.5)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                    fill: true,
+                    pointRadius: 0, // 不显示点
+                    tension: 0, // [修复] 设为0，确保图表忠实反映原始数据，防止视觉误差
+                    draggable: false, // 这条线不可拖动
+                },
+                {
+                    // Dataset 1: 可拖拽的控制点
+                    label: 'Control Points',
+                    data: gameConfig.K_CONTROL_POINTS,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 1)',
+                    pointRadius: 8,
+                    pointHoverRadius: 10,
+                    showLine: true, // 在控制点之间显示一条参考线
+                    fill: false,
+                    tension: 0, // [修复] 将连接线拉直，避免视觉混淆
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    min: 0,
+                    max: 1,
+                    title: { display: true, text: 'K Value' },
+                },
+                x: {
+                    type: 'linear', // 确保X轴是线性的
+                    title: { display: true, text: 'Screw Index' },
+                },
+            },
+            plugins: {
+                legend: {
+                    display: false,
+                },
+                dragData: {
+                    round: 2,
+                    dragX: false, // [重要] 只允许垂直拖动
+                    showTooltip: true,
+                    // [修复] 使用onDragStart来精确控制哪个数据集可被拖动
+                    onDragStart: function (e, datasetIndex) {
+                        // 只允许拖动数据集1 (控制点)
+                        return datasetIndex === 1;
+                    },
+                    onDragEnd: function (e, datasetIndex, index, value) {
+                        if (datasetIndex !== 1) return; // 双重保险
 
-    // Draw current progress line
-    if (totalScrews > 0) {
-        const progressRatio = Math.min(currentScrewIndex / totalScrews, 1);
-        const x = progressRatio * width;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-        ctx.lineWidth = 2;
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-    }
+                        const clampedValue = Math.max(0, Math.min(1, value.y));
+                        gameConfig.K_CONTROL_POINTS[index].y = clampedValue;
+                        kValueChart.data.datasets[1].data[index].y = clampedValue;
+
+                        // 重新生成平滑曲线并更新图表
+                        generateKValuesFromControlPoints();
+                        kValueChart.data.datasets[0].data = gameConfig.K_VALUES;
+                        kValueChart.update('none');
+
+                        // 重置游戏
+                        startGame();
+                    },
+                },
+                annotation: {
+                    annotations: {
+                        progressLine: {
+                            type: 'line',
+                            scaleID: 'x',
+                            value: currentScrewIndex,
+                            borderColor: 'rgba(255, 0, 0, 0.7)',
+                            borderWidth: 2,
+                        },
+                    },
+                },
+            },
+        },
+    });
 }

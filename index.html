@@ -82,14 +82,30 @@
             text-shadow: 0 0 2px #000;
         }
 
+        .screw-id-display {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 0 0 2px rgba(0, 0, 0, 0.7);
+            pointer-events: none;
+            z-index: 11;
+            /* 确保在螺丝颜色之上 */
+        }
+
         .cell {
             width: 30px;
             height: 30px;
             background: #eee;
             position: relative;
         }
-
-
 
         #boxes {
             display: flex;
@@ -219,7 +235,7 @@
         #difficulty-panel {
             margin-top: 30px;
             position: fixed;
-            right: 20px;
+            left: 20px;
             top: 400px;
             width: 400px;
         }
@@ -228,7 +244,7 @@
             margin-bottom: 5px;
         }
 
-        #difficulty-panel canvas {
+        #difficulty-canvas {
             background: #fff;
             border: 1px solid #ccc;
         }
@@ -317,7 +333,7 @@
             </div>
             <div>
                 <label for="color-count-input">螺丝颜色数:</label>
-                <input id="color-count-input" type="number" value="7" min="1" max="10">
+                <input id="color-count-input" type="number" value="8" min="1" max="10">
             </div>
             <div>
                 <label for="min-onboard-screws">场上最少螺丝:</label>
@@ -332,8 +348,10 @@
             </div>
         </div>
         <div>
-            <label>难度选择:</label>
-            <div id="difficulty-buttons"></div>
+            <label>难度配置:</label>
+            <div class="difficulty-text">当前K值:<span id="current-difficulty">-</span></div>
+            <div class="difficulty-text">当前K值索引:<span id="current-difficulty-index">-</span></div>
+            <canvas id="difficulty-canvas" width="400" height="200"></canvas>
         </div>
         <button id="reset-btn">重置游戏</button>
         <button id="auto-btn">自动玩</button>
@@ -371,13 +389,10 @@
 
     <div id="message"></div>
 
-    <div id="difficulty-panel">
-        <h2>难度信息</h2>
-        <div class="difficulty-text">当前K值:<span id="current-difficulty">-</span></div>
-        <div class="difficulty-text">当前K值索引:<span id="current-difficulty-index">-</span></div>
-        <canvas id="difficulty-canvas" width="400" height="200"></canvas>
-    </div>
-
+    <script src="./js/chart.js"></script>
+    <script src="./js/chartjs-plugin-dragdata.js"></script>
+    <script src="./js/chartjs-plugin-annotation.js"></script>
+    <script src='./js/dynamicColorAllocation.js'></script>
     <script src='./js/game.js'></script>
     <script src='./js/autoplay.js'></script>
 </body>
